@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { useShallow } from 'zustand/react/shallow';
 import { initStore, useStore } from './store';
 import { AddPanel } from './components/AddPanel';
 import { QueueView } from './components/QueueView';
@@ -12,14 +11,11 @@ type Tab = 'queue' | 'done' | 'settings';
 export default function App() {
   const [tab, setTab] = useState<Tab>('queue');
   const [error, setError] = useState<string | null>(null);
-  const [queueCount, doneCount] = useStore(
-    useShallow((s) => {
-      let q = 0;
-      let d = 0;
-      for (const v of Object.values(s.videos)) v.status === 'done' ? d++ : q++;
-      return [q, d];
-    }),
-  );
+  const queueCount = useStore((s) => {
+    let q = 0;
+    for (const v of Object.values(s.videos)) if (v.status !== 'done') q++;
+    return q;
+  });
   const outputDir = useStore((s) => s.settings?.outputDir);
 
   useEffect(() => {
