@@ -116,8 +116,11 @@ pub fn insert(
     url: &str,
     quality: &str,
 ) -> rusqlite::Result<Option<Video>> {
+    // 상태를 직접 'ready'로 넣는다. 이전 버전으로 만든 DB는 기본값이 'queued'라서
+    // 기본값에 맡기면 추가하자마자 다운로드가 시작된다.
     let n = conn.execute(
-        "INSERT OR IGNORE INTO videos (video_id, url, quality, created_at) VALUES (?1, ?2, ?3, ?4)",
+        "INSERT OR IGNORE INTO videos (video_id, url, quality, status, created_at)
+         VALUES (?1, ?2, ?3, 'ready', ?4)",
         params![video_id, url, quality, now()],
     )?;
     if n == 0 {
@@ -312,6 +315,27 @@ mod tests {
         assert!(request_download(&c, a.id).unwrap());
         assert!(unqueue(&c, a.id).unwrap());
         assert!(claim_next(&c).unwrap().is_none(), "요청 취소한 항목은 받지 않음");
+    }
+
+    #[test]
+    fn added_items_are_ready_even_with_old_schema() {
+        // 이전 버전 DB: status 기본값이 'queued'
+        let c = Connection::open_in_memory().unwrap();
+        c.execute_batch(
+            "CREATE TABLE videos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, video_id TEXT NOT NULL UNIQUE,
+                url TEXT NOT NULL, title TEXT, channel TEXT, duration REAL, thumbnail TEXT,
+                meta_state TEXT NOT NULL DEFAULT 'pending', status TEXT NOT NULL DEFAULT 'queued',
+                quality TEXT NOT NULL DEFAULT 'best', file_path TEXT, file_size INTEGER,
+                error_msg TEXT, retry_count INTEGER NOT NULL DEFAULT 0,
+                next_attempt_at INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL,
+                completed_at INTEGER);",
+        )
+        .unwrap();
+        init(&c).unwrap();
+        let v = insert(&c, "ddddddddddd", "u", "best").unwrap().unwrap();
+        assert_eq!(v.status, "ready");
+        assert!(claim_next(&c).unwrap().is_none(), "추가만 하면 다운로드가 시작되지 않음");
     }
 
     #[test]
