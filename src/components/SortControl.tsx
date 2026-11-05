@@ -1,12 +1,12 @@
 import { SORT_LABELS, type Sort, type SortKey } from "../sort";
 import { SortDirIcon } from "./icons";
-import { Button, control, cx } from "../ui";
+import { Button, lineControl } from "../ui";
 
 export function SortControl({ sort, onChange, dateLabel }: { sort: Sort; onChange: (s: Sort) => void; dateLabel: string }) {
   return (
     <div className="flex items-center gap-1">
       <select
-        className={cx(control, "h-8")}
+        className={lineControl}
         value={sort.key}
         title="Sort by"
         onChange={(e) => onChange({ ...sort, key: e.target.value as SortKey })}

@@ -33,6 +33,7 @@ function StatusBar({ tab }: { tab: Tab }) {
       return c;
     }),
   );
+  const pausedUntil = useStore((s) => s.metaPausedUntil);
   if (tab === 'settings') return null;
 
   let text = '';
@@ -42,7 +43,17 @@ function StatusBar({ tab }: { tab: Tab }) {
   } else if (tab === 'done') {
     text = `Done ${c.done}`;
   }
-  return <footer className='truncate pt-2 pb-2.5 text-[12px] text-dim'>{text}</footer>;
+  // 정보 조회를 쉬는 중이면 언제 다시 시작하는지 알린다
+  const paused =
+    tab === 'queue' && pausedUntil
+      ? `Video info paused by YouTube's request limit · retrying at ${new Date(pausedUntil).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`
+      : null;
+  return (
+    <footer className='truncate pt-2 pb-2.5 text-[12px] text-dim'>
+      {text}
+      {paused && <span className='text-warn'> · {paused}</span>}
+    </footer>
+  );
 }
 
 export default function App() {

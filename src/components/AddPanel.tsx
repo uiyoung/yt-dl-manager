@@ -4,6 +4,7 @@ import { useStore } from '../store';
 import { CloseIcon } from './icons';
 import { Badge, Button, control, cx } from '../ui';
 import type { AddResult } from '../types';
+import { askPlaylist } from '../askPlaylist';
 
 type Tone = 'ok' | 'warn' | 'error';
 
@@ -40,7 +41,10 @@ function summarize(r: AddResult): { text: string; tone: Tone } {
     parts.push(`${r.playlistErrors.length} playlist ${r.playlistErrors.length === 1 ? 'error' : 'errors'}`);
   }
 
-  if (!parts.length) return { text: 'No YouTube links found.', tone: 'error' };
+  if (!parts.length) {
+    return { text: 'No YouTube links found.', tone: 'error' };
+  }
+
   return { text: parts.join(' · '), tone: r.added.length ? 'ok' : 'warn' };
 }
 
@@ -66,12 +70,22 @@ export function AddPanel() {
   const upsert = useStore((s) => s.upsert);
 
   async function add() {
-    if (!text.trim() || busy) return;
+    if (!text.trim() || busy) {
+      return;
+    }
 
     setBusy(true);
 
     try {
-      const r = await api.addLinks(text);
+      // 재생목록 안의 영상 링크가 있으면 재생목록 전체를 넣을지 먼저 묻는다
+      const inPlaylist = await api.playlistVideoLinks(text);
+      let expand = false;
+      if (inPlaylist.length) {
+        const choice = await askPlaylist(inPlaylist);
+        if (!choice) return;
+        expand = choice === 'playlist';
+      }
+      const r = await api.addLinks(text, expand);
       upsert(r.added);
       setNotice({ ...summarize(r), result: r });
       if (r.added.length || r.duplicates.length) setText('');
@@ -106,6 +120,7 @@ export function AddPanel() {
           {busy ? 'Adding…' : 'Add'}
         </Button>
       </div>
+
       {notice && (
         <div className={cx('mt-2 flex items-start gap-2 rounded-md px-2.5 py-2', toneClass[notice.tone])}>
           <div className='flex min-w-0 flex-1 flex-col gap-1.5'>

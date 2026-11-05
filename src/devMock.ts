@@ -71,14 +71,23 @@ export function installDevMock() {
           settings = a.settings as Settings;
           return settings;
         case "check_tools":
-          return { ytdlp: "2026.10.26 (mock)", ffmpeg: true };
+          return {
+            ytdlp: { version: "2026.10.26 (mock)", path: "/opt/homebrew/bin/yt-dlp" },
+            ffmpeg: { version: "7.1.1", path: "/opt/homebrew/bin/ffmpeg" },
+            ffprobe: null,
+          };
+        case "playlist_video_links":
+          return (String(a.text).match(/\S+/g) ?? []).filter((u) => /v=[\w-]{11}.*list=(?!RD|WL\b|LL\b)/.test(u));
         case "add_links": {
-          const urls = String(a.text).match(/\S+/g) ?? [];
+          const urls: string[] = String(a.text).match(/\S+/g) ?? [];
           const added: Video[] = [];
           const duplicates = [];
           const pasteDuplicates: string[] = [];
           const unrecognized: string[] = [];
           const seen = new Set<string>();
+          if (a.expandPlaylists)
+            for (const u of [...urls])
+              if (/list=/.test(u)) urls.push(...["plist000001", "plist000002", "plist000003"]);
           for (const url of urls) {
             const id =
               url.match(/(?:v=|youtu\.be\/|shorts\/)([\w-]{11})/)?.[1] ?? url.match(/^([\w-]{11})\.?$/)?.[1];

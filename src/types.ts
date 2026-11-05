@@ -55,9 +55,17 @@ export interface AddResult {
   playlistErrors: string[];
 }
 
+/** 찾은 도구 하나: 버전과 실제로 쓰는 실행 파일 경로 */
+export interface ToolInfo {
+  version: string;
+  path: string;
+}
+
+/** 못 찾은 도구는 null */
 export interface ToolStatus {
-  ytdlp: string | null;
-  ffmpeg: boolean;
+  ytdlp: ToolInfo | null;
+  ffmpeg: ToolInfo | null;
+  ffprobe: ToolInfo | null;
 }
 
 export const QUALITY_OPTIONS: { value: string; label: string }[] = [

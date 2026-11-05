@@ -13,7 +13,7 @@ import { heightLabel } from "./QualitySelect";
 import { RowMenu, type MenuItem } from "./RowMenu";
 import { SortControl } from "./SortControl";
 import { PlayIcon, TrashIcon } from "./icons";
-import { actionsClass, Button, control, cx, emptyClass, listClass, rowClass, thumbClass, viewClass } from "../ui";
+import { actionsClass, Button, cx, emptyClass, lineControl, listClass, rowClass, thumbClass, viewClass } from "../ui";
 
 const qualityLabel = (q: string) =>
   /^\d+$/.test(q) ? heightLabel(Number(q)) : (QUALITY_OPTIONS.find((o) => o.value === q)?.label ?? q);
@@ -89,7 +89,7 @@ export function DoneView() {
   return (
     <div className={viewClass}>
       <div className="flex items-center gap-2">
-        <input className={cx(control, "w-[260px]")} placeholder="Search title or channel" value={query} onChange={(e) => setQuery(e.target.value)} />
+        <input className={cx(lineControl, "w-[260px]")} placeholder="Search title or channel" value={query} onChange={(e) => setQuery(e.target.value)} />
         <span className="flex-1" />
         <SortControl sort={sort} onChange={setSort} dateLabel="Date completed" />
       </div>

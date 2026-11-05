@@ -17,7 +17,10 @@ pub struct AppState {
     pub notify: Notify,
     /// 진행 중인 다운로드: id → 중지 신호
     pub jobs: Mutex<HashMap<i64, oneshot::Sender<()>>>,
+    /// 영상 정보 조회를 동시에 몇 개까지 할지
     pub meta_sem: Semaphore,
+    /// YouTube가 요청을 제한하면 이 시각까지 정보 조회를 쉰다
+    pub meta_blocked_until: Mutex<Option<Instant>>,
 }
 
 impl AppState {
@@ -26,7 +29,8 @@ impl AppState {
             db: Mutex::new(conn),
             notify: Notify::new(),
             jobs: Mutex::new(HashMap::new()),
-            meta_sem: Semaphore::new(4),
+            meta_sem: Semaphore::new(META_CONCURRENCY),
+            meta_blocked_until: Mutex::new(None),
         }
     }
 
@@ -311,9 +315,86 @@ fn pick_error(lines: &VecDeque<String>, code: Option<i32>) -> String {
 }
 
 // ---------- 영상 정보 조회 ----------
+// YouTube는 짧은 시간에 요청이 몰리면 IP를 잠시 막는다(429, "not a bot" 확인).
+// 그래서 천천히 조회하고, 막히면 한동안 쉬었다가 다시 시도한다.
 
+const META_CONCURRENCY: usize = 2;
+/// 조회 하나가 끝난 뒤 다음 조회까지 쉬는 시간
+const META_GAP: Duration = Duration::from_millis(1500);
+/// 막혔을 때 쉬는 시간
+const META_BLOCK: Duration = Duration::from_secs(15 * 60);
+
+/// yt-dlp 오류가 YouTube의 요청 제한 때문인지
+fn is_rate_limited(stderr: &str) -> bool {
+    let s = stderr.to_ascii_lowercase();
+    ["http error 429", "too many requests", "not a bot", "rate-limited", "rate limited"]
+        .iter()
+        .any(|k| s.contains(k))
+}
+
+/// 정보 조회를 쉬는 중이면 남은 시간
+fn meta_wait(st: &AppState) -> Option<Duration> {
+    let until = (*st.meta_blocked_until.lock().unwrap())?;
+    until.checked_duration_since(Instant::now())
+}
+
+/// 화면에 조회를 쉬는 중인지 알린다. until_ms는 다시 시작하는 시각(유닉스 밀리초), None이면 풀림
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct MetaPause {
+    pub until_ms: Option<u64>,
+}
+
+fn emit_meta_pause(app: &AppHandle, wait: Option<Duration>) {
+    let until_ms = wait.map(|w| {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default();
+        (now + w).as_millis() as u64
+    });
+    let _ = app.emit("meta-paused", MetaPause { until_ms });
+}
+
+/// 정보를 조회한다. 요청 제한에 걸리면 쉬었다가 같은 영상을 다시 조회한다.
 pub async fn fetch_meta(app: AppHandle, st: Arc<AppState>, id: i64, url: String) {
     let Ok(_permit) = st.meta_sem.acquire().await else { return };
+    loop {
+        while let Some(w) = meta_wait(&st) {
+            tokio::time::sleep(w).await;
+        }
+        match fetch_meta_once(&url).await {
+            Err(MetaError::RateLimited) => {
+                let mut until = st.meta_blocked_until.lock().unwrap();
+                // 이미 다른 조회가 막힘을 알렸으면 다시 알리지 않는다
+                if until.map_or(true, |u| u <= Instant::now()) {
+                    *until = Some(Instant::now() + META_BLOCK);
+                    emit_meta_pause(&app, Some(META_BLOCK));
+                }
+            }
+            r => {
+                // 쉬었다가 처음 성공하면 화면의 '쉬는 중' 표시를 지운다
+                if r.is_ok() && st.meta_blocked_until.lock().unwrap().take().is_some() {
+                    emit_meta_pause(&app, None);
+                }
+                save_meta(&st, id, r.ok());
+                emit_video(&app, &st, id);
+                break;
+            }
+        }
+    }
+    tokio::time::sleep(META_GAP).await;
+}
+
+enum MetaError {
+    RateLimited,
+    Failed,
+}
+
+/// (영상 정보, 화질 목록)
+type Meta = (serde_json::Value, Option<Vec<u32>>);
+
+async fn fetch_meta_once(url: &str) -> Result<Meta, MetaError> {
+
     let out = tools::ytdlp()
         .args([
             "--skip-download",
@@ -326,22 +407,37 @@ pub async fn fetch_meta(app: AppHandle, st: Arc<AppState>, id: i64, url: String)
             "-O",
             "%(formats.:.{width,height,vcodec,ext,format_note})j",
             "--",
-            &url,
+            url,
         ])
         .output()
-        .await;
+        .await
+        .map_err(|_| MetaError::Failed)?;
+    if !out.status.success() {
+        return Err(if is_rate_limited(&String::from_utf8_lossy(&out.stderr)) {
+            MetaError::RateLimited
+        } else {
+            MetaError::Failed
+        });
+    }
     // 첫 줄은 영상 정보(객체), 둘째 줄은 형식 목록(배열)
     let mut parsed = None;
     let mut heights = None;
-    if let Some(o) = out.ok().filter(|o| o.status.success()) {
-        for line in String::from_utf8_lossy(&o.stdout).lines() {
-            match serde_json::from_str::<serde_json::Value>(line) {
-                Ok(j @ serde_json::Value::Object(_)) => parsed = Some(j),
-                Ok(serde_json::Value::Array(fs)) => heights = Some(video_heights(&fs)),
-                _ => {}
-            }
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        match serde_json::from_str::<serde_json::Value>(line) {
+            Ok(j @ serde_json::Value::Object(_)) => parsed = Some(j),
+            Ok(serde_json::Value::Array(fs)) => heights = Some(video_heights(&fs)),
+            _ => {}
         }
     }
+    parsed.map(|j| (j, heights)).ok_or(MetaError::Failed)
+}
+
+/// 조회 결과를 저장한다. None이면 '정보 없음'으로 표시
+fn save_meta(st: &AppState, id: i64, meta: Option<Meta>) {
+    let (parsed, heights) = match meta {
+        Some((j, h)) => (Some(j), h),
+        None => (None, None),
+    };
     {
         let conn = st.conn();
         let _ = match &parsed {
@@ -364,7 +460,6 @@ pub async fn fetch_meta(app: AppHandle, st: Arc<AppState>, id: i64, url: String)
             let _ = db::set_heights(&conn, id, &hs);
         }
     }
-    emit_video(&app, &st, id);
 }
 
 /// 받은 파일의 실제 화질을 읽는다: 표시 화질("1080" 등) 또는 영상이 없으면 "audio".
@@ -462,6 +557,14 @@ pub async fn expand_playlist(list_id: &str) -> Result<Vec<String>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn detects_rate_limit_errors() {
+        assert!(is_rate_limited("ERROR: [youtube] abc: HTTP Error 429: Too Many Requests"));
+        assert!(is_rate_limited("ERROR: [youtube] abc: Sign in to confirm you’re not a bot."));
+        assert!(is_rate_limited("Your account has been rate-limited by YouTube for up to an hour"));
+        assert!(!is_rate_limited("ERROR: [youtube] abc: Video unavailable. This video is private"));
+    }
 
     #[test]
     fn error_line_selection() {

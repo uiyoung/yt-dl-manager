@@ -6,13 +6,9 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use tokio::process::Command;
 
+/// 시스템 PATH에 없을 수 있는 흔한 설치 위치
 fn extra_dirs() -> Vec<PathBuf> {
-    let mut v = Vec::new();
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            v.push(dir.to_path_buf()); // 앱과 함께 묶은 실행 파일
-        }
-    }
+    let mut v: Vec<PathBuf> = Vec::new();
     #[cfg(not(windows))]
     {
         v.push("/opt/homebrew/bin".into());
@@ -25,18 +21,27 @@ fn extra_dirs() -> Vec<PathBuf> {
     v
 }
 
-pub fn search_path() -> OsString {
-    let mut dirs: Vec<PathBuf> = std::env::var_os("PATH")
-        .map(|p| std::env::split_paths(&p).collect())
-        .unwrap_or_default();
-    for d in extra_dirs() {
-        if !dirs.contains(&d) {
+/// 찾는 순서: 시스템 PATH → 흔한 설치 위치. 도구는 앱에 넣지 않고 사용자가 직접 설치한다
+/// (Chocolatey, winget, Homebrew 등). 그래서 업그레이드도 그 설치 도구로 하면 앱이 바로 새 판을 쓴다.
+fn ordered_dirs(path: Vec<PathBuf>, extra: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    for d in path.into_iter().chain(extra) {
+        if !d.as_os_str().is_empty() && !dirs.contains(&d) {
             dirs.push(d);
         }
     }
-    std::env::join_paths(dirs).unwrap_or_default()
+    dirs
 }
 
+/// 자식 프로세스에도 같은 순서를 넘겨서, yt-dlp가 ffmpeg를 찾을 때도 같은 판을 쓰게 한다
+pub fn search_path() -> OsString {
+    let path = std::env::var_os("PATH")
+        .map(|p| std::env::split_paths(&p).collect())
+        .unwrap_or_default();
+    std::env::join_paths(ordered_dirs(path, extra_dirs())).unwrap_or_default()
+}
+
+/// 실행 파일 경로. 못 찾으면 이름만 돌려주고, 실행하면 "찾을 수 없음" 오류가 난다
 pub fn find(name: &str) -> PathBuf {
     let file = if cfg!(windows) {
         format!("{name}.exe")
@@ -71,4 +76,23 @@ pub fn command(name: &str) -> Command {
 
 pub fn ytdlp() -> Command {
     command("yt-dlp")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ordered_dirs;
+    use std::path::PathBuf;
+
+    #[test]
+    fn path_comes_first_without_duplicates() {
+        let p = |s: &str| PathBuf::from(s);
+        let dirs = ordered_dirs(
+            vec![p(r"C:\ProgramData\chocolatey\bin"), p("/usr/bin"), p("")],
+            vec![p("/opt/homebrew/bin"), p("/usr/bin")],
+        );
+        assert_eq!(
+            dirs,
+            vec![p(r"C:\ProgramData\chocolatey\bin"), p("/usr/bin"), p("/opt/homebrew/bin")]
+        );
+    }
 }

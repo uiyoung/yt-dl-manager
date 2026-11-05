@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "./api";
 import type { Progress, Settings, Video } from "./types";
+import { toast } from "./toast";
 
 interface AppStore {
   videos: Record<number, Video>;
@@ -10,6 +11,8 @@ interface AppStore {
   /** 대기열에서 체크한 항목 */
   selected: Record<number, true>;
   settings: Settings | null;
+  /** YouTube가 요청을 제한해서 영상 정보 조회를 쉬는 중이면 다시 시작하는 시각(밀리초) */
+  metaPausedUntil: number | null;
   upsert: (vs: Video[]) => void;
   remove: (ids: number[]) => void;
   setSelected: (ids: number[], on: boolean) => void;
@@ -22,6 +25,7 @@ export const useStore = create<AppStore>((set) => ({
   progress: {},
   selected: {},
   settings: null,
+  metaPausedUntil: null,
   upsert: (vs) =>
     set((st) => {
       const videos = { ...st.videos };
@@ -78,6 +82,11 @@ export async function initStore() {
         : s,
     ),
   );
+  await listen<{ untilMs: number | null }>("meta-paused", (e) => {
+    const until = e.payload.untilMs;
+    useStore.setState({ metaPausedUntil: until });
+    if (until) toast("YouTube is limiting requests. Video info lookup is paused for a while.", "error");
+  });
   const [videos, settings] = await Promise.all([api.listVideos(), api.getSettings()]);
   useStore.getState().upsert(videos);
   useStore.setState({ settings });

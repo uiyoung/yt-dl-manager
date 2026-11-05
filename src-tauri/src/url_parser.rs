@@ -16,6 +16,8 @@ pub enum Link {
 pub struct Found {
     pub link: Link,
     pub url: String,
+    /// 재생목록 안의 영상을 가리키는 링크(watch?v=…&list=…)의 재생목록 ID
+    pub playlist: Option<String>,
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -60,6 +62,14 @@ pub fn classify(url: &str) -> Option<Link> {
         .map(|c| Link::Playlist(c[1].to_string()))
 }
 
+/// 영상 링크에 함께 붙은 재생목록 ID. 펼칠 수 있는 재생목록만 돌려준다:
+/// 자동 생성 믹스(RD…)는 끝없이 이어지는 추천 목록이고, WL/LL(나중에 볼 동영상·좋아요)은 로그인해야 보인다.
+pub fn playlist_of_video_link(url: &str) -> Option<String> {
+    let id = LIST_RE.captures(url)?[1].to_string();
+    let special = id.starts_with("RD") || id == "WL" || id == "LL";
+    (!special).then_some(id)
+}
+
 /// 공백·쉼표·괄호·따옴표로 나눈 낱말 (영상 ID만 따로 붙여넣은 경우를 찾는 데 쓴다)
 static TOKEN_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r#"[^\s,;()\[\]<>"'`]+"#).unwrap());
 
@@ -93,7 +103,11 @@ pub fn parse_links(text: &str) -> ParseResult {
                 if res.links.iter().any(|f| f.link == link) {
                     res.paste_duplicates.push(url);
                 } else {
-                    res.links.push(Found { link, url });
+                    let playlist = match link {
+                        Link::Video(_) => playlist_of_video_link(&url),
+                        Link::Playlist(_) => None,
+                    };
+                    res.links.push(Found { link, url, playlist });
                 }
             }
             None => res.unrecognized.push(url),
@@ -193,5 +207,17 @@ mod tests {
         assert!(r.links.is_empty());
         let r = parse_links("https://www.youtube.com/@channel");
         assert_eq!(r.unrecognized, vec!["https://www.youtube.com/@channel".to_string()]);
+    }
+
+    #[test]
+    fn video_link_inside_playlist() {
+        let r = parse_links(
+            "https://www.youtube.com/watch?v=aaaaaaaaaaa&list=PLabc_123 \
+             https://www.youtube.com/watch?v=bbbbbbbbbbb&list=RDbbbbbbbbbbb \
+             https://youtu.be/ccccccccccc?list=WL https://youtu.be/ddddddddddd",
+        );
+        let lists: Vec<Option<&str>> = r.links.iter().map(|f| f.playlist.as_deref()).collect();
+        assert_eq!(lists, vec![Some("PLabc_123"), None, None, None]);
+        assert_eq!(r.links[0].link, v("aaaaaaaaaaa"));
     }
 }

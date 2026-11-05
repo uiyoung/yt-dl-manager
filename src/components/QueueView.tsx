@@ -20,18 +20,31 @@ const bar = 'relative h-1.5 max-w-[320px] flex-1 overflow-hidden rounded-[3px] b
 
 const ProgressInfo = memo(function ProgressInfo({ id }: { id: number }) {
   const p = useStore((s) => s.progress[id]);
-  if (!p) return <div className={statusLine}>Starting…</div>;
-  if (p.stage === 'processing')
+  if (!p) {
+    return <div className={statusLine}>Starting…</div>;
+  }
+
+  if (p.stage === 'processing') {
     return (
       <div className={statusLine}>
-        <div className={cx(bar, "after:absolute after:inset-0 after:w-[30%] after:animate-slide after:bg-highlight after:content-['']")} />
+        <div
+          className={cx(
+            bar,
+            "after:absolute after:inset-0 after:w-[30%] after:animate-slide after:bg-highlight after:content-['']",
+          )}
+        />
         <span>Processing file…</span>
       </div>
     );
+  }
+
   return (
     <div className={statusLine}>
       <div className={bar}>
-        <div className='h-full bg-highlight transition-[width] duration-250 ease-linear' style={{ width: `${p.percent}%` }} />
+        <div
+          className='h-full bg-highlight transition-[width] duration-250 ease-linear'
+          style={{ width: `${p.percent}%` }}
+        />
       </div>
       <span className='whitespace-nowrap text-dim tabular-nums'>
         {p.percent.toFixed(1)}%{p.total ? ` · ${fmtBytes(p.total)}` : ''}
@@ -104,6 +117,7 @@ async function removeVideos(ids: number[]) {
 
 function menuItems(v: Video): MenuItem[] {
   const editable = v.status === 'ready' || v.status === 'error';
+
   const items: MenuItem[] = [
     { label: 'Open on YouTube', onClick: () => openUrl(v.url) },
     { label: 'Copy YouTube link', onClick: () => copyText(v.url, 'Link copied') },
@@ -125,13 +139,18 @@ function menuItems(v: Video): MenuItem[] {
       },
     },
   ];
+
   if (v.outputDir)
     items.push({
       label: 'Use default save folder',
       disabled: !editable,
       onClick: () => api.setOutputDir(v.id, null).catch((e) => toast(String(e), 'error')),
     });
-  if (v.errorMsg) items.push({ label: 'Copy error message', onClick: () => copyText(v.errorMsg!) });
+
+  if (v.errorMsg) {
+    items.push({ label: 'Copy error message', onClick: () => copyText(v.errorMsg!) });
+  }
+
   items.push('separator', { label: 'Remove from list', danger: true, onClick: () => removeVideos([v.id]) });
   return items;
 }
@@ -147,9 +166,11 @@ const QueueRow = memo(function QueueRow({
   onCheck: (id: number, on: boolean, shift: boolean) => void;
 }) {
   const v = useStore((s) => s.videos[id]);
-  const checked = useStore((s) => !!s.selected[id]);
   if (!v) return null;
+
+  const checked = useStore((s) => !!s.selected[id]);
   const size = v.sizeEstimate ? `~${fmtBytes(v.sizeEstimate)}` : null;
+
   return (
     <li
       className={cx(
@@ -179,7 +200,7 @@ const QueueRow = memo(function QueueRow({
     >
       <img className={thumbClass} src={thumbUrl(v.videoId)} alt='' loading='lazy' />
       <div className='flex min-w-0 flex-1 flex-col gap-[3px]'>
-        <div className='truncate font-semibold' title={v.title ?? v.url}>
+        <div className='truncate font-semibold text-[13px]' title={v.title ?? v.url}>
           {v.title ?? (v.metaState === 'pending' ? 'Loading info…' : v.url)}
         </div>
         <div className='text-[12px] text-dim'>
@@ -198,7 +219,9 @@ const QueueRow = memo(function QueueRow({
         )}
         <StatusCell v={v} />
       </div>
+
       <QualitySelect v={v} />
+
       <div className={actionsClass}>
         <RowAction v={v} />
         <RowMenu items={menuItems(v)} />
@@ -219,6 +242,7 @@ const QueueRow = memo(function QueueRow({
 
 export function QueueView() {
   const [sort, setSort] = useSort('sort.queue', { key: 'date', desc: false });
+
   const ids = useStore(
     useShallow((s) =>
       sortVideos(
@@ -228,6 +252,7 @@ export function QueueView() {
       ).map((v) => v.id),
     ),
   );
+
   const counts = useStore(
     useShallow((s) => {
       const c = { sel: 0, selStartable: 0, selStoppable: 0 };
@@ -244,6 +269,7 @@ export function QueueView() {
       return c;
     }),
   );
+
   const setSelected = useStore((s) => s.setSelected);
   const clearSelection = useStore((s) => s.clearSelection);
   const lastClicked = useRef<number | null>(null);
@@ -308,18 +334,20 @@ export function QueueView() {
           />
           {counts.sel ? `${counts.sel} selected` : 'Select all'}
         </label>
+
         <Button variant='primary' disabled={!counts.selStartable} onClick={() => api.download(selectedIds())}>
-          <DownloadIcon /> Download selected{counts.selStartable ? ` (${counts.selStartable})` : ''}
+          <DownloadIcon /> Download {counts.selStartable ? ` (${counts.selStartable})` : ''}
         </Button>
         <Button disabled={!counts.selStoppable} onClick={() => api.stop(selectedIds())}>
-          <StopIcon /> Stop selected
+          <StopIcon /> Stop
         </Button>
+
         <Button
           disabled={!counts.sel}
           onClick={() => removeVideos(selectedIds())}
           title='Remove selected videos from the list'
         >
-          <TrashIcon /> Remove selected
+          <TrashIcon />
         </Button>
         <span className='flex-1' />
         <SortControl sort={sort} onChange={setSort} dateLabel='Date added' />

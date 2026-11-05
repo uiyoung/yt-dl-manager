@@ -1,6 +1,6 @@
 import { api } from "../api";
 import { QUALITY_OPTIONS, type Video } from "../types";
-import { control, cx } from "../ui";
+import { cx, lineControl } from "../ui";
 
 export function heightLabel(h: number) {
   if (h >= 4320) return `${h}p (8K)`;
@@ -29,7 +29,7 @@ export function QualitySelect({ v }: { v: Video }) {
   const loading = v.metaState === "pending";
   return (
     <select
-      className={cx(control, "w-[130px] shrink-0")}
+      className={cx(lineControl, "w-[130px] shrink-0")}
       value={v.quality}
       disabled={v.status === "downloading"}
       onChange={(e) => api.setQuality(v.id, e.target.value)}

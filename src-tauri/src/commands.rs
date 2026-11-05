@@ -41,8 +41,27 @@ pub struct AddResult {
     pub playlist_errors: Vec<String>,
 }
 
+/// 붙여넣기 안에서 '재생목록 안의 영상' 링크를 찾는다 (재생목록마다 하나씩).
+/// 추가하기 전에 재생목록 전체를 넣을지 그 영상만 넣을지 물어보는 데 쓴다.
 #[tauri::command]
-pub async fn add_links(app: AppHandle, st: St<'_>, text: String) -> Res<AddResult> {
+pub fn playlist_video_links(text: String) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    url_parser::parse_links(&text)
+        .links
+        .into_iter()
+        .filter(|f| f.playlist.as_ref().is_some_and(|p| seen.insert(p.clone())))
+        .map(|f| f.url)
+        .collect()
+}
+
+#[tauri::command]
+pub async fn add_links(
+    app: AppHandle,
+    st: St<'_>,
+    text: String,
+    expand_playlists: Option<bool>,
+) -> Res<AddResult> {
+    let expand = expand_playlists.unwrap_or(false);
     let parsed = url_parser::parse_links(&text);
     let mut paste_duplicates = parsed.paste_duplicates;
     let mut playlist_errors = Vec::new();
@@ -50,7 +69,21 @@ pub async fn add_links(app: AppHandle, st: St<'_>, text: String) -> Res<AddResul
     let mut ids: Vec<(String, String)> = Vec::new();
     for found in parsed.links {
         match found.link {
-            Link::Video(id) => ids.push((id, found.url)),
+            // 재생목록 안의 영상 링크: 사용자가 '재생목록 전체'를 고르면 펼친다.
+            // 펼치지 못하면 그 영상 하나라도 넣는다.
+            Link::Video(id) => match found.playlist.filter(|_| expand) {
+                Some(pid) => match queue::expand_playlist(&pid).await {
+                    Ok(list) => ids.extend(list.into_iter().map(|id| {
+                        let url = url_parser::video_url(&id);
+                        (id, url)
+                    })),
+                    Err(err) => {
+                        playlist_errors.push(format!("Playlist {}: {err}", found.url));
+                        ids.push((id, found.url));
+                    }
+                },
+                None => ids.push((id, found.url)),
+            },
             Link::Playlist(pid) => match queue::expand_playlist(&pid).await {
                 Ok(list) => ids.extend(list.into_iter().map(|id| {
                     let url = url_parser::video_url(&id);
@@ -284,34 +317,56 @@ pub fn save_settings(st: St, settings: Settings) -> Res<Settings> {
     Ok(s)
 }
 
+/// 찾은 도구 하나: 버전과 실제로 쓰는 실행 파일 경로
 #[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
+pub struct ToolInfo {
+    pub version: String,
+    pub path: String,
+}
+
+#[derive(Serialize)]
 pub struct ToolStatus {
-    pub ytdlp: Option<String>,
-    pub ffmpeg: bool,
+    pub ytdlp: Option<ToolInfo>,
+    pub ffmpeg: Option<ToolInfo>,
+    pub ffprobe: Option<ToolInfo>,
+}
+
+/// 도구를 버전 옵션으로 실행해 보고, 성공하면 출력 첫 줄에서 버전을 뽑는다
+async fn probe_tool(name: &str, arg: &str) -> Option<ToolInfo> {
+    let out = crate::tools::command(name).arg(arg).output().await.ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    Some(ToolInfo {
+        version: tool_version(name, &text),
+        path: crate::tools::find(name).to_string_lossy().into_owned(),
+    })
+}
+
+/// yt-dlp는 버전만 출력하고, ffmpeg/ffprobe는 "ffmpeg version 7.1 Copyright ..." 꼴이다
+fn tool_version(name: &str, text: &str) -> String {
+    let line = text.lines().next().unwrap_or("").trim();
+    let prefix = format!("{name} version ");
+    match line.strip_prefix(&prefix) {
+        Some(rest) => rest.split_whitespace().next().unwrap_or("").to_string(),
+        None => line.to_string(),
+    }
 }
 
 #[tauri::command]
 pub async fn check_tools() -> ToolStatus {
-    let ytdlp = crate::tools::ytdlp()
-        .arg("--version")
-        .output()
-        .await
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
-    let ffmpeg = crate::tools::command("ffmpeg")
-        .arg("-version")
-        .output()
-        .await
-        .map(|o| o.status.success())
-        .unwrap_or(false);
-    ToolStatus { ytdlp, ffmpeg }
+    let (ytdlp, ffmpeg, ffprobe) = tokio::join!(
+        probe_tool("yt-dlp", "--version"),
+        probe_tool("ffmpeg", "-version"),
+        probe_tool("ffprobe", "-version"),
+    );
+    ToolStatus { ytdlp, ffmpeg, ffprobe }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{move_file, thumbnail_files};
+    use super::{move_file, thumbnail_files, tool_version};
 
     /// 실제 휴지통에 파일을 하나 넣으므로 평소에는 건너뛴다: cargo test -- --ignored trash
     #[test]
@@ -355,5 +410,15 @@ mod tests {
         assert!(move_file(&src, &b).is_err(), "같은 이름이 있으면 덮어쓰지 않음");
         assert!(src.exists(), "실패하면 원본은 그대로");
         std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn reads_tool_versions() {
+        assert_eq!(tool_version("yt-dlp", "2026.10.26\n"), "2026.10.26");
+        assert_eq!(
+            tool_version("ffmpeg", "ffmpeg version 7.1.1 Copyright (c) 2000-2025\nbuilt with"),
+            "7.1.1"
+        );
+        assert_eq!(tool_version("ffprobe", "ffprobe version n7.1-12-g1a2b Copyright"), "n7.1-12-g1a2b");
     }
 }

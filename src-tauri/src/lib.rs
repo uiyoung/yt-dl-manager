@@ -48,6 +48,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::list_videos,
             commands::add_links,
+            commands::playlist_video_links,
             commands::download_videos,
             commands::stop_videos,
             commands::set_quality,
