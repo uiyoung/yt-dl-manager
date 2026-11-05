@@ -30,7 +30,7 @@ export function Toast() {
   );
 }
 
-export async function copyText(text: string, what = "복사했습니다") {
+export async function copyText(text: string, what = "Copied") {
   try {
     await navigator.clipboard.writeText(text);
   } catch {
@@ -43,7 +43,7 @@ export async function copyText(text: string, what = "복사했습니다") {
     ta.select();
     const ok = document.execCommand("copy");
     ta.remove();
-    if (!ok) return toast("복사하지 못했습니다.", "error");
+    if (!ok) return toast("Couldn't copy.", "error");
   }
   toast(what);
 }

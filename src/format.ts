@@ -22,7 +22,7 @@ export function fmtDuration(sec: number | null | undefined): string {
 export function fmtDate(unix: number | null | undefined): string {
   if (!unix) return "";
   const d = new Date(unix * 1000);
-  return d.toLocaleString("ko-KR", {
+  return d.toLocaleString("en-US", {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",

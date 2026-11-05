@@ -1,37 +1,38 @@
-import { memo, useRef } from "react";
-import { useShallow } from "zustand/react/shallow";
-import { open } from "@tauri-apps/plugin-dialog";
-import { openUrl } from "@tauri-apps/plugin-opener";
-import { api } from "../api";
-import { useStore } from "../store";
-import { fmtBytes, fmtDuration, thumbUrl } from "../format";
-import { sortVideos, useSort } from "../sort";
-import { copyText, toast } from "../toast";
-import { QUALITY_OPTIONS, type Video } from "../types";
-import { RowMenu, type MenuItem } from "./RowMenu";
-import { SortControl } from "./SortControl";
-import { TrashIcon } from "./icons";
+import { memo, useEffect, useRef } from 'react';
+import { useShallow } from 'zustand/react/shallow';
+import { open } from '@tauri-apps/plugin-dialog';
+import { openUrl } from '@tauri-apps/plugin-opener';
+import { api } from '../api';
+import { useStore } from '../store';
+import { fmtBytes, fmtDuration, thumbUrl } from '../format';
+import { sortVideos, useSort } from '../sort';
+import { confirmRemove } from '../confirmRemove';
+import { copyText, toast } from '../toast';
+import type { Video } from '../types';
+import { QualitySelect } from './QualitySelect';
+import { RowMenu, type MenuItem } from './RowMenu';
+import { SortControl } from './SortControl';
+import { DownloadIcon, RetryIcon, StopIcon, TrashIcon } from './icons';
 
 const ProgressInfo = memo(function ProgressInfo({ id }: { id: number }) {
   const p = useStore((s) => s.progress[id]);
-  if (!p) return <div className="status-line">시작하는 중…</div>;
-  if (p.stage === "processing")
+  if (!p) return <div className='status-line'>Starting…</div>;
+  if (p.stage === 'processing')
     return (
-      <div className="status-line">
-        <div className="bar indeterminate" />
-        <span>파일 처리 중…</span>
+      <div className='status-line'>
+        <div className='bar indeterminate' />
+        <span>Processing file…</span>
       </div>
     );
   return (
-    <div className="status-line">
-      <div className="bar">
-        <div className="fill" style={{ width: `${p.percent}%` }} />
+    <div className='status-line'>
+      <div className='bar'>
+        <div className='fill' style={{ width: `${p.percent}%` }} />
       </div>
-      <span className="nums">
-        {p.percent.toFixed(1)}%
-        {p.total ? ` · ${fmtBytes(p.total)}` : ""}
-        {p.speed ? ` · ${fmtBytes(p.speed)}/s` : ""}
-        {p.eta != null ? ` · ${fmtDuration(p.eta)} 남음` : ""}
+      <span className='nums'>
+        {p.percent.toFixed(1)}%{p.total ? ` · ${fmtBytes(p.total)}` : ''}
+        {p.speed ? ` · ${fmtBytes(p.speed)}/s` : ''}
+        {p.eta != null ? ` · ${fmtDuration(p.eta)} left` : ''}
       </span>
     </div>
   );
@@ -39,25 +40,25 @@ const ProgressInfo = memo(function ProgressInfo({ id }: { id: number }) {
 
 function StatusCell({ v }: { v: Video }) {
   switch (v.status) {
-    case "downloading":
+    case 'downloading':
       return <ProgressInfo id={v.id} />;
-    case "queued":
+    case 'queued':
       return (
-        <div className="status-line">
-          <span className="badge pending">다운로드 대기</span>
+        <div className='status-line'>
+          <span className='badge pending'>Queued</span>
         </div>
       );
-    case "error":
+    case 'error':
       return (
-        <div className="status-line error" title={v.errorMsg ?? ""}>
-          <span className="badge error">실패</span>
-          <span className="err-text">{v.errorMsg}</span>
+        <div className='status-line error' title={v.errorMsg ?? ''}>
+          <span className='badge error'>Failed</span>
+          <span className='err-text'>{v.errorMsg}</span>
         </div>
       );
     default:
       return (
-        <div className="status-line">
-          <span className="badge">준비</span>
+        <div className='status-line'>
+          <span className='badge'>Ready</span>
         </div>
       );
   }
@@ -66,60 +67,73 @@ function StatusCell({ v }: { v: Video }) {
 /** 상태에 따라 줄마다 하나의 주 동작 버튼 */
 function RowAction({ v }: { v: Video }) {
   switch (v.status) {
-    case "ready":
-      return <button onClick={() => api.download([v.id])}>↓ 다운로드</button>;
-    case "error":
+    case 'ready':
       return (
-        <button className="retry" onClick={() => api.download([v.id])}>
-          ↻ 다시 시도
+        <button onClick={() => api.download([v.id])}>
+          <DownloadIcon /> Download
         </button>
       );
-    case "queued":
-    case "downloading":
-      return <button onClick={() => api.stop([v.id])}>■ 중지</button>;
+    case 'error':
+      return (
+        <button className='retry' onClick={() => api.download([v.id])}>
+          <RetryIcon /> Retry
+        </button>
+      );
+    case 'queued':
+    case 'downloading':
+      return (
+        <button onClick={() => api.stop([v.id])}>
+          <StopIcon /> Stop
+        </button>
+      );
     default:
       return null;
   }
 }
 
 async function removeVideos(ids: number[]) {
+  const all = useStore.getState().videos;
+  if (!(await confirmRemove(ids.map((id) => all[id]).filter(Boolean)))) return;
   await api.remove(ids);
   useStore.getState().remove(ids);
 }
 
 function menuItems(v: Video): MenuItem[] {
-  const editable = v.status === "ready" || v.status === "error";
+  const editable = v.status === 'ready' || v.status === 'error';
   const items: MenuItem[] = [
-    { label: "YouTube에서 열기", onClick: () => openUrl(v.url) },
-    { label: "YouTube 링크 복사", onClick: () => copyText(v.url, "링크를 복사했습니다") },
-    "separator",
+    { label: 'Open on YouTube', onClick: () => openUrl(v.url) },
+    { label: 'Copy YouTube link', onClick: () => copyText(v.url, 'Link copied') },
+    'separator',
     {
-      label: "저장 폴더 변경…",
+      label: 'Change save folder…',
       disabled: !editable,
-      hint: editable ? undefined : "받는 중이거나 순서를 기다리는 영상은 바꿀 수 없습니다",
+      hint: editable ? undefined : "Can't change while downloading or queued",
       onClick: async () => {
         const defaultPath = v.outputDir ?? useStore.getState().settings?.outputDir;
-        const dir = await open({ directory: true, defaultPath, title: "이 영상을 저장할 폴더" });
-        if (typeof dir !== "string") return;
+        const dir = await open({ directory: true, defaultPath, title: 'Save this video to' });
+        if (typeof dir !== 'string') return;
         try {
           await api.setOutputDir(v.id, dir);
-          toast("저장 폴더를 바꿨습니다");
+          toast('Save folder changed');
         } catch (e) {
-          toast(String(e), "error");
+          toast(String(e), 'error');
         }
       },
     },
   ];
   if (v.outputDir)
     items.push({
-      label: "기본 저장 폴더로 되돌리기",
+      label: 'Use default save folder',
       disabled: !editable,
-      onClick: () => api.setOutputDir(v.id, null).catch((e) => toast(String(e), "error")),
+      onClick: () => api.setOutputDir(v.id, null).catch((e) => toast(String(e), 'error')),
     });
-  if (v.errorMsg) items.push({ label: "오류 메시지 복사", onClick: () => copyText(v.errorMsg!) });
-  items.push("separator", { label: "목록에서 제거", danger: true, onClick: () => removeVideos([v.id]) });
+  if (v.errorMsg) items.push({ label: 'Copy error message', onClick: () => copyText(v.errorMsg!) });
+  items.push('separator', { label: 'Remove from list', danger: true, onClick: () => removeVideos([v.id]) });
   return items;
 }
+
+/** 행 안의 이 요소들을 누를 때는 선택을 바꾸지 않는다 */
+const NO_SELECT = 'button, select, a, textarea, input, [role=menu], [role=menuitem]';
 
 const QueueRow = memo(function QueueRow({
   id,
@@ -131,57 +145,57 @@ const QueueRow = memo(function QueueRow({
   const v = useStore((s) => s.videos[id]);
   const checked = useStore((s) => !!s.selected[id]);
   if (!v) return null;
-  const size = v.sizeEstimate ? `약 ${fmtBytes(v.sizeEstimate)}` : null;
+  const size = v.sizeEstimate ? `~${fmtBytes(v.sizeEstimate)}` : null;
   return (
-    <li className={`row status-${v.status}${checked ? " selected" : ""}`}>
-      <input
-        type="checkbox"
-        className="row-check"
-        checked={checked}
-        onChange={() => {}}
-        onClick={(e) => onCheck(id, !checked, e.shiftKey)}
-        aria-label="선택"
-      />
-      <img className="thumb" src={thumbUrl(v.videoId)} alt="" loading="lazy" />
-      <div className="info">
-        <div className="title" title={v.title ?? v.url}>
-          {v.title ?? (v.metaState === "pending" ? "정보 불러오는 중…" : v.url)}
+    <li
+      className={`row selectable status-${v.status}${checked ? ' selected' : ''}`}
+      aria-selected={checked}
+      // 키보드: Tab으로 행에 와서 Space로 선택 켜기/끄기
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key !== ' ' || e.target !== e.currentTarget) return;
+        e.preventDefault();
+        onCheck(id, !checked, e.shiftKey);
+      }}
+      // Shift+클릭 때 글자가 드래그 선택되지 않게
+      onMouseDown={(e) => e.shiftKey && e.preventDefault()}
+      onClick={(e) => {
+        // 메뉴는 포털로 그려져도 이벤트가 행으로 올라오므로, 행 안에서 난 클릭만 받는다
+        if (!e.currentTarget.contains(e.target as Node)) return;
+        if ((e.target as HTMLElement).closest(NO_SELECT)) return;
+        // 클릭·⌘/Ctrl+클릭: 이 행만 켜고 끄기 · Shift+클릭: 마지막으로 누른 행부터 범위
+        onCheck(id, !checked, e.shiftKey);
+      }}
+    >
+      <img className='thumb' src={thumbUrl(v.videoId)} alt='' loading='lazy' />
+      <div className='info'>
+        <div className='title' title={v.title ?? v.url}>
+          {v.title ?? (v.metaState === 'pending' ? 'Loading info…' : v.url)}
         </div>
-        <div className="meta">
-          {[v.channel, fmtDuration(v.duration)].filter(Boolean).join(" · ")}
+        <div className='meta'>
+          {[v.channel, fmtDuration(v.duration)].filter(Boolean).join(' · ')}
           {size && (
-            <span title="최고화질 기준 예상 크기">
-              {v.channel || v.duration ? " · " : ""}
+            <span title='Estimated size at best quality'>
+              {v.channel || v.duration ? ' · ' : ''}
               {size}
             </span>
           )}
         </div>
         {v.outputDir && (
-          <div className="meta folder" title={v.outputDir}>
-            저장 폴더: {v.outputDir}
+          <div className='meta folder' title={v.outputDir}>
+            Save folder: {v.outputDir}
           </div>
         )}
         <StatusCell v={v} />
       </div>
-      <select
-        value={v.quality}
-        disabled={v.status === "downloading"}
-        onChange={(e) => api.setQuality(v.id, e.target.value)}
-        title="화질"
-      >
-        {QUALITY_OPTIONS.map((q) => (
-          <option key={q.value} value={q.value}>
-            {q.label}
-          </option>
-        ))}
-      </select>
-      <div className="actions">
+      <QualitySelect v={v} />
+      <div className='actions'>
         <RowAction v={v} />
         <RowMenu items={menuItems(v)} />
         <button
-          className="ghost icon-btn danger-hover"
-          title="목록에서 제거 (받은 파일은 지우지 않음)"
-          aria-label="목록에서 제거"
+          className='ghost icon-btn danger-hover'
+          title='Remove from list (downloaded file is kept)'
+          aria-label='Remove from list'
           onClick={() => removeVideos([v.id])}
         >
           <TrashIcon />
@@ -192,26 +206,23 @@ const QueueRow = memo(function QueueRow({
 });
 
 export function QueueView() {
-  const [sort, setSort] = useSort("sort.queue", { key: "date", desc: false });
+  const [sort, setSort] = useSort('sort.queue', { key: 'date', desc: false });
   const ids = useStore(
     useShallow((s) =>
       sortVideos(
-        Object.values(s.videos).filter((v) => v.status !== "done"),
+        Object.values(s.videos).filter((v) => v.status !== 'done'),
         sort,
-        "queue",
+        'queue',
       ).map((v) => v.id),
     ),
   );
   const counts = useStore(
     useShallow((s) => {
-      const c = { ready: 0, active: 0, failed: 0, sel: 0, selStartable: 0, selStoppable: 0 };
+      const c = { sel: 0, selStartable: 0, selStoppable: 0 };
       for (const v of Object.values(s.videos)) {
-        if (v.status === "done") continue;
-        const startable = v.status === "ready" || v.status === "error";
-        const stoppable = v.status === "queued" || v.status === "downloading";
-        if (v.status === "ready") c.ready++;
-        if (stoppable) c.active++;
-        if (v.status === "error") c.failed++;
+        if (v.status === 'done') continue;
+        const startable = v.status === 'ready' || v.status === 'error';
+        const stoppable = v.status === 'queued' || v.status === 'downloading';
         if (s.selected[v.id]) {
           c.sel++;
           if (startable) c.selStartable++;
@@ -227,6 +238,27 @@ export function QueueView() {
 
   const idsRef = useRef(ids);
   idsRef.current = ids;
+
+  // ⌘/Ctrl+A 전체 선택, Esc 선택 해제 (입력란에 있을 때는 그대로 둔다)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement;
+      if (t.closest('input:not([type=checkbox]), textarea, select, [contenteditable=true]')) return;
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'a') {
+        e.preventDefault();
+        setSelected(idsRef.current, true);
+      } else if (
+        e.key === 'Escape' &&
+        // 열린 메뉴가 있으면 Esc는 메뉴만 닫는다
+        !document.querySelector('[role=menu]') &&
+        document.querySelector('.row.selected')
+      ) {
+        clearSelection();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [setSelected, clearSelection]);
 
   // Shift+클릭으로 범위 선택 (지금 보이는 정렬 순서 기준)
   const onCheck = useRef((id: number, on: boolean, shift: boolean) => {
@@ -249,11 +281,11 @@ export function QueueView() {
   const allChecked = ids.length > 0 && counts.sel === ids.length;
 
   return (
-    <div className="view">
-      <div className="toolbar">
-        <label className="check select-all" title="전체 선택">
+    <div className='view'>
+      <div className='toolbar'>
+        <label className='check select-all' title='Select all'>
           <input
-            type="checkbox"
+            type='checkbox'
             checked={allChecked}
             ref={(el) => {
               if (el) el.indeterminate = counts.sel > 0 && !allChecked;
@@ -261,27 +293,29 @@ export function QueueView() {
             onChange={() => (allChecked ? clearSelection() : setSelected(ids, true))}
             disabled={!ids.length}
           />
-          {counts.sel ? `${counts.sel}개 선택` : "전체 선택"}
+          {counts.sel ? `${counts.sel} selected` : 'Select all'}
         </label>
-        <button className="primary" disabled={!counts.selStartable} onClick={() => api.download(selectedIds())}>
-          ↓ 선택 다운로드{counts.selStartable ? ` (${counts.selStartable})` : ""}
+        <button className='primary' disabled={!counts.selStartable} onClick={() => api.download(selectedIds())}>
+          <DownloadIcon /> Download selected{counts.selStartable ? ` (${counts.selStartable})` : ''}
         </button>
         <button disabled={!counts.selStoppable} onClick={() => api.stop(selectedIds())}>
-          ■ 선택 중지
+          <StopIcon /> Stop selected
         </button>
-        <button disabled={!counts.sel} onClick={() => removeVideos(selectedIds())} title="선택한 영상을 목록에서 제거">
-          <TrashIcon /> 선택 제거
+        <button
+          disabled={!counts.sel}
+          onClick={() => removeVideos(selectedIds())}
+          title='Remove selected videos from the list'
+        >
+          <TrashIcon /> Remove selected
         </button>
-        <span className="spacer" />
-        <span className="counts">
-          준비 {counts.ready} · 진행/대기 {counts.active} · 실패 {counts.failed}
-        </span>
-        <SortControl sort={sort} onChange={setSort} dateLabel="추가한 날짜순" />
+        <span className='spacer' />
+        <SortControl sort={sort} onChange={setSort} dateLabel='Date added' />
       </div>
+
       {ids.length === 0 ? (
-        <div className="empty">대기열이 비어 있습니다. 위에 링크를 붙여넣어 추가하세요.</div>
+        <div className='empty'>The queue is empty. Paste links above to add videos.</div>
       ) : (
-        <ul className="list">
+        <ul className='list'>
           {ids.map((id) => (
             <QueueRow key={id} id={id} onCheck={onCheck} />
           ))}

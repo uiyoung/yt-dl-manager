@@ -6,7 +6,7 @@ export type MenuItem =
   | { label: string; onClick: () => void; disabled?: boolean; danger?: boolean; hint?: string }
   | "separator";
 
-/** "⋯" 버튼과 펼침 메뉴. 목록 스크롤 영역에 잘리지 않도록 body에 띄운다. */
+/** "더 보기" 버튼과 펼침 메뉴. 목록 스크롤 영역에 잘리지 않도록 body에 띄운다. */
 export function RowMenu({ items }: { items: MenuItem[] }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
@@ -28,7 +28,11 @@ export function RowMenu({ items }: { items: MenuItem[] }) {
   useEffect(() => {
     if (!open) return;
     const close = (e: Event) => {
-      if (e.type === "keydown" && (e as KeyboardEvent).key !== "Escape") return;
+      if (e.type === "keydown") {
+        if ((e as KeyboardEvent).key !== "Escape") return;
+        // Esc는 메뉴만 닫는다 (대기열의 '선택 해제'까지 가지 않게)
+        e.stopPropagation();
+      }
       if (e.type === "mousedown" && (menu.current?.contains(e.target as Node) || btn.current?.contains(e.target as Node)))
         return;
       setOpen(false);
@@ -51,8 +55,8 @@ export function RowMenu({ items }: { items: MenuItem[] }) {
       <button
         ref={btn}
         className={`ghost icon-btn${open ? " active" : ""}`}
-        title="더 보기"
-        aria-label="더 보기"
+        title="More"
+        aria-label="More"
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => {

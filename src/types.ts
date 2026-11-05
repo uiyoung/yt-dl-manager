@@ -21,6 +21,10 @@ export interface Video {
   sizeEstimate: number | null;
   /** 이 영상만의 저장 폴더 (없으면 설정의 저장 폴더) */
   outputDir: string | null;
+  /** 이 영상이 지원하는 화질 (짧은 변 기준, 높은 순). 아직 모르면 null. */
+  heights: number[] | null;
+  /** 실제로 받은 화질 ("1080" 등 또는 "audio"). 모르면 null */
+  gotQuality: string | null;
 }
 
 export interface Progress {
@@ -57,19 +61,19 @@ export interface ToolStatus {
 }
 
 export const QUALITY_OPTIONS: { value: string; label: string }[] = [
-  { value: "best", label: "최고화질" },
+  { value: "best", label: "Best" },
   { value: "2160", label: "2160p (4K)" },
   { value: "1440", label: "1440p" },
   { value: "1080", label: "1080p" },
   { value: "720", label: "720p" },
   { value: "480", label: "480p" },
-  { value: "audio", label: "오디오만 (m4a)" },
+  { value: "audio", label: "Audio only (m4a)" },
 ];
 
 export const FILENAME_PRESETS: { value: string; label: string }[] = [
-  { value: "%(title)s [%(id)s].%(ext)s", label: "제목 [ID]" },
-  { value: "%(title)s.%(ext)s", label: "제목" },
-  { value: "%(upload_date>%Y-%m-%d)s - %(title)s.%(ext)s", label: "업로드일 - 제목" },
-  { value: "%(channel)s - %(title)s.%(ext)s", label: "채널 - 제목" },
-  { value: "%(channel)s/%(title)s [%(id)s].%(ext)s", label: "채널 폴더 / 제목 [ID]" },
+  { value: "%(title)s [%(id)s].%(ext)s", label: "Title [ID]" },
+  { value: "%(title)s.%(ext)s", label: "Title" },
+  { value: "%(upload_date>%Y-%m-%d)s - %(title)s.%(ext)s", label: "Upload date - Title" },
+  { value: "%(channel)s - %(title)s.%(ext)s", label: "Channel - Title" },
+  { value: "%(channel)s/%(title)s [%(id)s].%(ext)s", label: "Channel folder / Title [ID]" },
 ];

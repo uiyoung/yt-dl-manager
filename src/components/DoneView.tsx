@@ -1,30 +1,42 @@
 import { useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { open } from "@tauri-apps/plugin-dialog";
-import { openPath, openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { api } from "../api";
 import { useStore } from "../store";
 import { fmtBytes, fmtDate, fmtDuration, thumbUrl } from "../format";
 import { sortVideos, useSort } from "../sort";
+import { askRemoveDone } from "../confirmRemove";
 import { copyText, toast } from "../toast";
 import { QUALITY_OPTIONS, type Video } from "../types";
+import { heightLabel } from "./QualitySelect";
 import { RowMenu, type MenuItem } from "./RowMenu";
 import { SortControl } from "./SortControl";
-import { TrashIcon } from "./icons";
+import { PlayIcon, TrashIcon } from "./icons";
 
-const qualityLabel = (q: string) => QUALITY_OPTIONS.find((o) => o.value === q)?.label ?? q;
+const qualityLabel = (q: string) =>
+  /^\d+$/.test(q) ? heightLabel(Number(q)) : (QUALITY_OPTIONS.find((o) => o.value === q)?.label ?? q);
 
 async function tryOpen(fn: () => Promise<void>) {
   try {
     await fn();
   } catch (e) {
-    toast(`파일을 열 수 없습니다. 옮겨졌거나 삭제됐을 수 있습니다. (${e})`, "error");
+    toast(`Can't open the file: ${e}`, "error");
   }
 }
 
 async function removeOne(v: Video) {
-  await api.remove([v.id]);
+  const choice = await askRemoveDone(v);
+  if (!choice) return;
+  try {
+    if (choice === "trash") await api.trashDoneVideo(v.id);
+    else await api.remove([v.id]);
+  } catch (e) {
+    toast(String(e), "error");
+    return;
+  }
   useStore.getState().remove([v.id]);
+  if (choice === "trash") toast("Moved the file to the Trash");
 }
 
 function parentDir(p: string) {
@@ -34,31 +46,31 @@ function parentDir(p: string) {
 
 function menuItems(v: Video): MenuItem[] {
   return [
-    { label: "YouTube에서 열기", onClick: () => openUrl(v.url) },
-    { label: "YouTube 링크 복사", onClick: () => copyText(v.url, "링크를 복사했습니다") },
+    { label: "Open on YouTube", onClick: () => openUrl(v.url) },
+    { label: "Copy YouTube link", onClick: () => copyText(v.url, "Link copied") },
     "separator",
     {
-      label: "파일 경로 복사",
+      label: "Copy file path",
       disabled: !v.filePath,
-      onClick: () => copyText(v.filePath!, "파일 경로를 복사했습니다"),
+      onClick: () => copyText(v.filePath!, "File path copied"),
     },
     {
-      label: "다른 폴더로 옮기기…",
+      label: "Move to another folder…",
       disabled: !v.filePath,
-      hint: "받은 파일(과 썸네일)을 고른 폴더로 옮깁니다",
+      hint: "Moves the file (and thumbnail) to the folder you pick",
       onClick: async () => {
-        const dir = await open({ directory: true, defaultPath: parentDir(v.filePath!), title: "파일을 옮길 폴더" });
+        const dir = await open({ directory: true, defaultPath: parentDir(v.filePath!), title: "Move file to" });
         if (typeof dir !== "string") return;
         try {
           await api.moveDoneFile(v.id, dir);
-          toast("파일을 옮겼습니다");
+          toast("File moved");
         } catch (e) {
           toast(String(e), "error");
         }
       },
     },
     "separator",
-    { label: "목록에서 제거", danger: true, hint: "받은 파일은 지우지 않습니다", onClick: () => removeOne(v) },
+    { label: "Remove…", danger: true, hint: "Remove from the list, and choose whether to keep the file", onClick: () => removeOne(v) },
   ];
 }
 
@@ -76,41 +88,50 @@ export function DoneView() {
   return (
     <div className="view">
       <div className="toolbar">
-        <input className="search" placeholder="제목·채널 검색" value={query} onChange={(e) => setQuery(e.target.value)} />
+        <input className="search" placeholder="Search title or channel" value={query} onChange={(e) => setQuery(e.target.value)} />
         <span className="spacer" />
-        <span className="counts">완료 {done.length}개</span>
-        <SortControl sort={sort} onChange={setSort} dateLabel="완료한 날짜순" />
+        <SortControl sort={sort} onChange={setSort} dateLabel="Date completed" />
       </div>
       {list.length === 0 ? (
-        <div className="empty">{done.length ? "검색 결과가 없습니다." : "아직 완료된 다운로드가 없습니다."}</div>
+        <div className="empty">{done.length ? "No results." : "No completed downloads yet."}</div>
       ) : (
         <ul className="list">
           {list.map((v) => (
             <li key={v.id} className="row">
-              <img className="thumb" src={thumbUrl(v.videoId)} alt="" loading="lazy" />
+              <button
+                className="thumb-btn"
+                title="Open thumbnail"
+                aria-label="Open thumbnail"
+                disabled={!v.filePath}
+                onClick={() => tryOpen(() => api.openDoneThumbnail(v.id))}
+              >
+                <img className="thumb" src={thumbUrl(v.videoId)} alt="" loading="lazy" />
+              </button>
               <div className="info">
                 <div className="title" title={v.filePath ?? ""}>
                   {v.title ?? v.url}
                 </div>
                 <div className="meta">
-                  {[v.channel, fmtDuration(v.duration), qualityLabel(v.quality), fmtBytes(v.fileSize)]
+                  {[v.channel, fmtDuration(v.duration), qualityLabel(v.gotQuality ?? v.quality), fmtBytes(v.fileSize)]
                     .filter(Boolean)
                     .join(" · ")}
                 </div>
-                <div className="meta dim">{fmtDate(v.completedAt)} 완료</div>
+                <div className="meta dim">Completed {fmtDate(v.completedAt)}</div>
               </div>
               <div className="actions">
                 {v.filePath && (
                   <>
-                    <button onClick={() => tryOpen(() => openPath(v.filePath!))}>▶ 재생</button>
-                    <button onClick={() => tryOpen(() => revealItemInDir(v.filePath!))}>폴더에서 보기</button>
+                    <button onClick={() => tryOpen(() => api.openDoneFile(v.id))}>
+                      <PlayIcon /> Play
+                    </button>
+                    <button onClick={() => tryOpen(() => revealItemInDir(v.filePath!))}>Show in folder</button>
                   </>
                 )}
                 <RowMenu items={menuItems(v)} />
                 <button
                   className="ghost icon-btn danger-hover"
-                  title="목록에서 제거 (받은 파일은 지우지 않음 · 제거하면 다시 추가할 수 있음)"
-                  aria-label="목록에서 제거"
+                  title="Remove (choose whether to keep the file)"
+                  aria-label="Remove"
                   onClick={() => removeOne(v)}
                 >
                   <TrashIcon />

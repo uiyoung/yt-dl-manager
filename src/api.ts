@@ -12,8 +12,11 @@ export const api = {
   /** 아직 받지 않은 영상의 저장 폴더 (null이면 기본 폴더로) */
   setOutputDir: (id: number, dir: string | null) => invoke<void>("set_output_dir", { id, dir }),
   /** 완료한 파일을 다른 폴더로 옮김 */
+  openDoneFile: (id: number) => invoke<void>("open_done_file", { id }),
+  openDoneThumbnail: (id: number) => invoke<void>("open_done_thumbnail", { id }),
   moveDoneFile: (id: number, dir: string) => invoke<Video>("move_done_file", { id, dir }),
   remove: (ids: number[]) => invoke<void>("remove_videos", { ids }),
+  trashDoneVideo: (id: number) => invoke<void>("trash_done_video", { id }),
   getSettings: () => invoke<Settings>("get_settings"),
   saveSettings: (settings: Settings) => invoke<Settings>("save_settings", { settings }),
   checkTools: () => invoke<ToolStatus>("check_tools"),

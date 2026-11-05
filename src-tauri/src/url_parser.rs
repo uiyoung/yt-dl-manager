@@ -60,11 +60,35 @@ pub fn classify(url: &str) -> Option<Link> {
         .map(|c| Link::Playlist(c[1].to_string()))
 }
 
+/// 공백·쉼표·괄호·따옴표로 나눈 낱말 (영상 ID만 따로 붙여넣은 경우를 찾는 데 쓴다)
+static TOKEN_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r#"[^\s,;()\[\]<>"'`]+"#).unwrap());
+
+/// 링크와, 낱말 하나가 통째로 11자리 영상 ID인 것을 입력 순서대로 찾는다.
+/// 영상 ID는 링크 바깥에 있을 때만 인정한다.
+fn candidates(text: &str) -> Vec<(String, Option<Link>)> {
+    let urls: Vec<_> = URL_RE.find_iter(text).collect();
+    let mut found: Vec<(usize, String, Option<Link>)> = urls
+        .iter()
+        .map(|m| (m.start(), m.as_str().to_string(), classify(m.as_str())))
+        .collect();
+    for t in TOKEN_RE.find_iter(text) {
+        if urls.iter().any(|u| t.start() < u.end() && u.start() < t.end()) {
+            continue;
+        }
+        // 문장 끝 마침표 등은 떼고 본다
+        let s = t.as_str().trim_matches(|c: char| matches!(c, '.' | ':' | '!' | '?'));
+        if is_video_id(s) {
+            found.push((t.start(), s.to_string(), Some(Link::Video(s.to_string()))));
+        }
+    }
+    found.sort_by_key(|f| f.0);
+    found.into_iter().map(|(_, s, l)| (s, l)).collect()
+}
+
 pub fn parse_links(text: &str) -> ParseResult {
     let mut res = ParseResult::default();
-    for m in URL_RE.find_iter(text) {
-        let url = m.as_str().to_string();
-        match classify(&url) {
+    for (url, link) in candidates(text) {
+        match link {
             Some(link) => {
                 if res.links.iter().any(|f| f.link == link) {
                     res.paste_duplicates.push(url);
@@ -72,7 +96,7 @@ pub fn parse_links(text: &str) -> ParseResult {
                     res.links.push(Found { link, url });
                 }
             }
-            None => res.unrecognized.push(m.as_str().to_string()),
+            None => res.unrecognized.push(url),
         }
     }
     res
@@ -142,6 +166,22 @@ mod tests {
             r.paste_duplicates,
             vec!["https://www.youtube.com/watch?v=aaaaaaaaaaa&t=3".to_string()]
         );
+        assert!(r.unrecognized.is_empty());
+    }
+
+    #[test]
+    fn bare_video_ids() {
+        let text = "dQw4w9WgXcQ\nhttps://youtu.be/aaaaaaaaaaa, bbbbbbbbbbb.\n\
+                    aaaaaaaaaaa (ccc-ccc_ccc) 짧은id 12345678901234 \
+                    https://example.com/ddddddddddd https://www.youtube.com/watch?v=eeeeeeeeeee";
+        let r = parse_links(text);
+        let links: Vec<Link> = r.links.iter().map(|f| f.link.clone()).collect();
+        assert_eq!(
+            links,
+            vec![v("dQw4w9WgXcQ"), v("aaaaaaaaaaa"), v("bbbbbbbbbbb"), v("ccc-ccc_ccc"), v("eeeeeeeeeee")]
+        );
+        assert_eq!(r.links[0].url, "dQw4w9WgXcQ");
+        assert_eq!(r.paste_duplicates, vec!["aaaaaaaaaaa".to_string()]);
         assert!(r.unrecognized.is_empty());
     }
 

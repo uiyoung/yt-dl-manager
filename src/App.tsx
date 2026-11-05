@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { initStore, useStore } from './store';
 import { AddPanel } from './components/AddPanel';
 import { QueueView } from './components/QueueView';
@@ -9,6 +10,32 @@ import './App.css';
 
 type Tab = 'queue' | 'done' | 'settings';
 
+/** 아래 상태줄: 탭마다 그 탭의 건수를 보여준다 (settings에서는 보이지 않음) */
+function StatusBar({ tab }: { tab: Tab }) {
+  const c = useStore(
+    useShallow((s) => {
+      const c = { ready: 0, active: 0, failed: 0, done: 0 };
+      for (const v of Object.values(s.videos)) {
+        if (v.status === 'ready') c.ready++;
+        else if (v.status === 'queued' || v.status === 'downloading') c.active++;
+        else if (v.status === 'error') c.failed++;
+        else if (v.status === 'done') c.done++;
+      }
+      return c;
+    }),
+  );
+  if (tab === 'settings') return null;
+
+  let text = '';
+
+  if (tab === 'queue') {
+    text = `Ready ${c.ready} · Active ${c.active} · Failed ${c.failed}`;
+  } else if (tab === 'done') {
+    text = `Done ${c.done}`;
+  }
+  return <footer className='footer'>{text}</footer>;
+}
+
 export default function App() {
   const [tab, setTab] = useState<Tab>('queue');
   const [error, setError] = useState<string | null>(null);
@@ -17,7 +44,6 @@ export default function App() {
     for (const v of Object.values(s.videos)) if (v.status !== 'done') q++;
     return q;
   });
-  const outputDir = useStore((s) => s.settings?.outputDir);
 
   useEffect(() => {
     initStore().catch((e) => setError(String(e)));
@@ -44,9 +70,7 @@ export default function App() {
       {tab === 'done' && <DoneView />}
       {tab === 'settings' && <SettingsView />}
       <Toast />
-      <footer className='footer' title={outputDir}>
-        저장 폴더: {outputDir ?? ''}
-      </footer>
+      <StatusBar tab={tab} />
     </main>
   );
 }

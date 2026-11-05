@@ -1,6 +1,10 @@
-# Tauri + React + Typescript
+# YT-DL-MANAGER
 
-This template should help get you started developing with Tauri, React and Typescript in Vite.
+Download YT video and manage
+
+## Stack
+
+- Tauri + React + Typescript
 
 ## Recommended IDE Setup
 

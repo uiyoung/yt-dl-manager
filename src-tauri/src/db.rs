@@ -12,7 +12,7 @@ pub fn now() -> i64 {
         .unwrap_or(0)
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Video {
     pub id: i64,
@@ -37,10 +37,14 @@ pub struct Video {
     pub size_estimate: Option<i64>,
     /// 이 영상만의 저장 폴더. 없으면 설정의 저장 폴더를 쓴다.
     pub output_dir: Option<String>,
+    /// 이 영상이 지원하는 화질 (짧은 변 기준, 높은 순). 아직 모르면 None.
+    pub heights: Option<Vec<u32>>,
+    /// 실제로 받은 화질 (받은 파일에서 읽음): "1080" 같은 표시 화질 또는 "audio". 모르면 None.
+    pub got_quality: Option<String>,
 }
 
 const COLS: &str = "id, video_id, url, title, channel, duration, thumbnail, meta_state, status, quality, \
-                    file_path, file_size, error_msg, created_at, completed_at, size_estimate, output_dir";
+                    file_path, file_size, error_msg, created_at, completed_at, size_estimate, output_dir, heights, got_quality";
 
 fn row_to_video(r: &Row) -> rusqlite::Result<Video> {
     Ok(Video {
@@ -61,6 +65,10 @@ fn row_to_video(r: &Row) -> rusqlite::Result<Video> {
         completed_at: r.get(14)?,
         size_estimate: r.get(15)?,
         output_dir: r.get(16)?,
+        heights: r
+            .get::<_, Option<String>>(17)?
+            .and_then(|s| serde_json::from_str(&s).ok()),
+        got_quality: r.get(18)?,
     })
 }
 
@@ -85,12 +93,14 @@ pub fn init(conn: &Connection) -> rusqlite::Result<()> {
             created_at INTEGER NOT NULL,
             completed_at INTEGER,
             size_estimate INTEGER,
-            output_dir TEXT
+            output_dir TEXT,
+            heights TEXT,
+            got_quality TEXT
          );
          CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
     )?;
     // 이전 버전으로 만든 DB에 새 열 추가
-    for (col, ty) in [("size_estimate", "INTEGER"), ("output_dir", "TEXT")] {
+    for (col, ty) in [("size_estimate", "INTEGER"), ("output_dir", "TEXT"), ("heights", "TEXT"), ("got_quality", "TEXT")] {
         if !has_column(conn, "videos", col)? {
             conn.execute_batch(&format!("ALTER TABLE videos ADD COLUMN {col} {ty}"))?;
         }
@@ -164,6 +174,46 @@ pub fn pending_meta(conn: &Connection) -> rusqlite::Result<Vec<Video>> {
     rows.collect()
 }
 
+/// 아직 받지 않았는데 화질 목록을 모르는 영상 (이전 버전에서 추가한 것)
+pub fn missing_heights(conn: &Connection) -> rusqlite::Result<Vec<Video>> {
+    let mut st = conn.prepare(&format!(
+        "SELECT {COLS} FROM videos
+         WHERE heights IS NULL AND meta_state!='pending' AND status IN ('ready','error') ORDER BY id"
+    ))?;
+    let rows = st.query_map([], row_to_video)?;
+    rows.collect()
+}
+
+/// 고른 화질이 영상에 없으면 그보다 낮은 화질 중 가장 높은 것으로 (없으면 가장 낮은 화질)
+pub fn fit_quality(quality: &str, heights: &[u32]) -> String {
+    match quality.parse::<u32>() {
+        Ok(q) if !heights.is_empty() && !heights.contains(&q) => heights
+            .iter()
+            .copied()
+            .filter(|h| *h <= q)
+            .max()
+            .or_else(|| heights.iter().copied().min())
+            .map(|h| h.to_string())
+            .unwrap_or_else(|| quality.to_string()),
+        _ => quality.to_string(),
+    }
+}
+
+/// 화질 목록 저장. 고른 화질이 영상에 없으면 맞는 화질로 바꾼다.
+pub fn set_heights(conn: &Connection, id: i64, heights: &[u32]) -> rusqlite::Result<()> {
+    let Some(v) = get(conn, id)? else { return Ok(()) };
+    let quality = if v.status == "downloading" {
+        v.quality.clone()
+    } else {
+        fit_quality(&v.quality, heights)
+    };
+    conn.execute(
+        "UPDATE videos SET heights=?2, quality=?3 WHERE id=?1",
+        params![id, serde_json::to_string(heights).unwrap(), quality],
+    )?;
+    Ok(())
+}
+
 pub fn set_meta(
     conn: &Connection,
     id: i64,
@@ -214,11 +264,12 @@ pub fn mark_done(
     id: i64,
     file_path: Option<&str>,
     file_size: Option<i64>,
+    got_quality: Option<&str>,
 ) -> rusqlite::Result<()> {
     conn.execute(
         "UPDATE videos SET status='done', file_path=?2, file_size=?3, error_msg=NULL,
-            completed_at=?4 WHERE id=?1",
-        params![id, file_path, file_size, now()],
+            completed_at=?4, got_quality=?5 WHERE id=?1",
+        params![id, file_path, file_size, now(), got_quality],
     )?;
     Ok(())
 }
@@ -340,7 +391,7 @@ mod tests {
         let c = mem();
         let v = insert(&c, "aaaaaaaaaaa", "u", "best").unwrap().unwrap();
         assert!(insert(&c, "aaaaaaaaaaa", "u2", "720").unwrap().is_none());
-        mark_done(&c, v.id, Some("/x.mp4"), Some(1)).unwrap();
+        mark_done(&c, v.id, Some("/x.mp4"), Some(1), Some("720")).unwrap();
         assert!(insert(&c, "aaaaaaaaaaa", "u", "best").unwrap().is_none());
         delete(&c, v.id).unwrap();
         assert!(insert(&c, "aaaaaaaaaaa", "u", "best").unwrap().is_some());
@@ -388,6 +439,24 @@ mod tests {
         let v = get(&c, v.id).unwrap().unwrap();
         assert_eq!((v.size_estimate, v.output_dir.as_deref()), (Some(1234), Some("/tmp/x")));
         assert!(claim_next(&c).unwrap().is_none(), "추가만 하면 다운로드가 시작되지 않음");
+    }
+
+    #[test]
+    fn quality_is_fitted_to_available_heights() {
+        let hs = [1080, 720, 480, 360];
+        assert_eq!(fit_quality("2160", &hs), "1080");
+        assert_eq!(fit_quality("1440", &hs), "1080");
+        assert_eq!(fit_quality("720", &hs), "720");
+        assert_eq!(fit_quality("240", &hs), "360", "더 낮은 게 없으면 가장 낮은 화질");
+        assert_eq!(fit_quality("best", &hs), "best");
+        assert_eq!(fit_quality("audio", &hs), "audio");
+        assert_eq!(fit_quality("1080", &[]), "1080");
+
+        let c = mem();
+        let v = insert(&c, "eeeeeeeeeee", "u", "2160").unwrap().unwrap();
+        set_heights(&c, v.id, &hs).unwrap();
+        let v = get(&c, v.id).unwrap().unwrap();
+        assert_eq!((v.quality.as_str(), v.heights), ("1080", Some(hs.to_vec())));
     }
 
     #[test]

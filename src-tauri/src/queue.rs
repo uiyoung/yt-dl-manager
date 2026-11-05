@@ -110,6 +110,10 @@ async fn run_job(
 ) {
     let outcome = download(&app, &v, &s, stop_rx).await;
     st.jobs.lock().unwrap().remove(&v.id);
+    let got = match &outcome {
+        Outcome::Done(Some(p)) => probe_quality(p).await,
+        _ => None,
+    };
     {
         let conn = st.conn();
         let _ = match &outcome {
@@ -118,7 +122,7 @@ async fn run_job(
                     .as_deref()
                     .and_then(|p| std::fs::metadata(p).ok())
                     .map(|m| m.len() as i64);
-                db::mark_done(&conn, v.id, path.as_deref(), size)
+                db::mark_done(&conn, v.id, path.as_deref(), size, got.as_deref())
             }
             Outcome::Stopped => db::set_status(&conn, v.id, "ready"),
             Outcome::Failed(msg) => db::mark_failed(&conn, v.id, msg),
@@ -132,10 +136,14 @@ pub fn format_args(quality: &str) -> Vec<String> {
     let v: Vec<&str> = match quality {
         "audio" => vec!["-f", "ba[ext=m4a]/ba/b", "-x", "--audio-format", "m4a"],
         "best" => vec!["-f", "bv*+ba/b", "--merge-output-format", "mp4"],
+        // res = 가로·세로 중 짧은 변. 세로 영상(Shorts)도 1080p를 1080으로 맞춘다.
+        // 그 화질이 없으면 그보다 낮은 것 중 가장 좋은 것을 받는다.
         h if h.parse::<u32>().is_ok() => {
             return vec![
                 "-f".into(),
-                format!("bv*[height<={h}]+ba/b[height<={h}]/bv*+ba/b"),
+                "bv*+ba/b".into(),
+                "-S".into(),
+                format!("res:{h}"),
                 "--merge-output-format".into(),
                 "mp4".into(),
             ];
@@ -152,6 +160,8 @@ fn build_args(v: &Video, s: &Settings) -> Vec<String> {
         "--progress",
         "--no-simulate",
         "--no-mtime",
+        // 이미 있는 영상·썸네일은 다시 받거나 덮어쓰지 않는다
+        "--no-overwrites",
         "--encoding",
         "utf-8",
         "--progress-template",
@@ -164,7 +174,9 @@ fn build_args(v: &Video, s: &Settings) -> Vec<String> {
     .collect();
     a.extend(format_args(&v.quality));
     if s.save_thumbnail {
-        a.extend(["--write-thumbnail", "--convert-thumbnails", "jpg"].map(String::from));
+        // 변환 없이 원본 그대로 저장한다. yt-dlp는 해상도 높은 썸네일부터 차례로 시도해
+        // 처음 있는 것을 받는다 (같은 크기면 webp가 앞이고, 큰 webp가 없으면 그 크기의 jpg).
+        a.push("--write-thumbnail".into());
     }
     a.extend([
         "-P".into(),
@@ -201,11 +213,11 @@ async fn download(
 ) -> Outcome {
     let out_dir = v.output_dir.as_deref().unwrap_or(&s.output_dir);
     if let Err(e) = std::fs::create_dir_all(out_dir) {
-        return Outcome::Failed(format!("저장 폴더를 만들 수 없습니다: {e}"));
+        return Outcome::Failed(format!("Can't create the save folder: {e}"));
     }
     let mut child = match tools::ytdlp().args(build_args(v, s)).spawn() {
         Ok(c) => c,
-        Err(e) => return Outcome::Failed(format!("yt-dlp를 실행할 수 없습니다: {e}")),
+        Err(e) => return Outcome::Failed(format!("Can't run yt-dlp: {e}")),
     };
 
     let stderr = child.stderr.take().unwrap();
@@ -278,7 +290,7 @@ async fn download(
             match status {
                 Ok(st) if st.success() => Outcome::Done(file),
                 Ok(st) => Outcome::Failed(pick_error(&errs, st.code())),
-                Err(e) => Outcome::Failed(format!("yt-dlp 실행 오류: {e}")),
+                Err(e) => Outcome::Failed(format!("yt-dlp error: {e}")),
             }
         }
         _ = &mut stop_rx => {
@@ -295,7 +307,7 @@ fn pick_error(lines: &VecDeque<String>, code: Option<i32>) -> String {
         .find(|l| l.starts_with("ERROR:"))
         .or_else(|| lines.iter().rev().find(|l| !l.starts_with("WARNING:")))
         .map(|l| l.trim_start_matches("ERROR:").trim().to_string())
-        .unwrap_or_else(|| format!("알 수 없는 오류 (종료 코드 {code:?})"))
+        .unwrap_or_else(|| format!("Unknown error (exit code {code:?})"))
 }
 
 // ---------- 영상 정보 조회 ----------
@@ -311,20 +323,25 @@ pub async fn fetch_meta(app: AppHandle, st: Arc<AppState>, id: i64, url: String)
             "utf-8",
             "-O",
             "%(.{title,channel,uploader,duration,thumbnail,filesize,filesize_approx})j",
+            "-O",
+            "%(formats.:.{width,height,vcodec,ext,format_note})j",
             "--",
             &url,
         ])
         .output()
         .await;
-    let parsed = out
-        .ok()
-        .filter(|o| o.status.success())
-        .and_then(|o| {
-            let text = String::from_utf8_lossy(&o.stdout).into_owned();
-            text.lines()
-                .rev()
-                .find_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
-        });
+    // 첫 줄은 영상 정보(객체), 둘째 줄은 형식 목록(배열)
+    let mut parsed = None;
+    let mut heights = None;
+    if let Some(o) = out.ok().filter(|o| o.status.success()) {
+        for line in String::from_utf8_lossy(&o.stdout).lines() {
+            match serde_json::from_str::<serde_json::Value>(line) {
+                Ok(j @ serde_json::Value::Object(_)) => parsed = Some(j),
+                Ok(serde_json::Value::Array(fs)) => heights = Some(video_heights(&fs)),
+                _ => {}
+            }
+        }
+    }
     {
         let conn = st.conn();
         let _ = match &parsed {
@@ -343,8 +360,75 @@ pub async fn fetch_meta(app: AppHandle, st: Arc<AppState>, id: i64, url: String)
             ),
             None => db::set_meta(&conn, id, None, None, None, None, None, false),
         };
+        if let Some(hs) = heights.filter(|h| !h.is_empty()) {
+            let _ = db::set_heights(&conn, id, &hs);
+        }
     }
     emit_video(&app, &st, id);
+}
+
+/// 받은 파일의 실제 화질을 읽는다: 표시 화질("1080" 등) 또는 영상이 없으면 "audio".
+/// ffprobe를 못 찾거나 읽지 못하면 None.
+pub async fn probe_quality(path: &str) -> Option<String> {
+    let out = tools::command("ffprobe")
+        .args([
+            "-v", "error",
+            // V = 영상 스트림만 (커버 이미지 제외)
+            "-select_streams", "V:0",
+            "-show_entries", "stream=width,height",
+            "-of", "csv=p=0",
+            "--",
+            path,
+        ])
+        .output()
+        .await
+        .ok()
+        .filter(|o| o.status.success())?;
+    quality_from_probe(&String::from_utf8_lossy(&out.stdout))
+}
+
+/// ffprobe 출력("1920,1080")을 표시 화질로. 영상 스트림이 없으면(빈 출력) "audio".
+fn quality_from_probe(out: &str) -> Option<String> {
+    let line = out.lines().map(str::trim).find(|l| !l.is_empty());
+    let Some(line) = line else { return Some("audio".into()) };
+    let mut it = line.split(',').map(|x| x.trim().parse::<u32>().ok());
+    let (w, h) = (it.next()??, it.next()??);
+    standard_height(w.min(h)).map(|h| h.to_string())
+}
+
+/// YouTube가 쓰는 표준 화질 단계
+const STANDARD_HEIGHTS: [u32; 9] = [4320, 2160, 1440, 1080, 720, 480, 360, 240, 144];
+
+/// 짧은 변 길이를 YouTube 표시 화질로 맞춘다 (그 이하 중 가장 높은 표준 단계).
+/// 예: 1080x608 → 480p, 2880x1800 → 1440p
+fn standard_height(short_side: u32) -> Option<u32> {
+    STANDARD_HEIGHTS.iter().copied().find(|h| *h <= short_side)
+}
+
+/// 형식 목록에서 실제 영상 화질만 골라 YouTube 표시 화질로 정리한다 (높은 순, 중복 없음).
+/// 오디오 전용, 미리보기 이미지(storyboard)는 뺀다.
+pub fn video_heights(formats: &[serde_json::Value]) -> Vec<u32> {
+    let mut hs: Vec<u32> = formats
+        .iter()
+        .filter(|f| {
+            let vcodec = f["vcodec"].as_str().unwrap_or("none");
+            vcodec != "none"
+                && f["ext"].as_str() != Some("mhtml")
+                && !f["format_note"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_lowercase()
+                    .contains("storyboard")
+        })
+        .filter_map(|f| {
+            let h = f["height"].as_u64()?;
+            let w = f["width"].as_u64().unwrap_or(h);
+            standard_height(w.min(h) as u32)
+        })
+        .collect();
+    hs.sort_unstable_by(|a, b| b.cmp(a));
+    hs.dedup();
+    hs
 }
 
 /// 재생목록 링크를 영상 ID 목록으로 펼친다.
@@ -362,10 +446,10 @@ pub async fn expand_playlist(list_id: &str) -> Result<Vec<String>, String> {
         ])
         .output()
         .await
-        .map_err(|e| format!("yt-dlp를 실행할 수 없습니다: {e}"))?;
+        .map_err(|e| format!("Can't run yt-dlp: {e}"))?;
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
-        return Err(err.lines().last().unwrap_or("재생목록을 읽지 못했습니다").to_string());
+        return Err(err.lines().last().unwrap_or("Couldn't read the playlist").to_string());
     }
     Ok(String::from_utf8_lossy(&out.stdout)
         .lines()
@@ -393,9 +477,49 @@ mod tests {
     }
 
     #[test]
+    fn heights_from_formats() {
+        let fs: Vec<serde_json::Value> = serde_json::from_str(
+            r#"[
+              {"ext":"mhtml","vcodec":"none","width":48,"height":27,"format_note":"storyboard"},
+              {"ext":"m4a","vcodec":"none","format_note":"medium"},
+              {"ext":"mp4","vcodec":"avc1","width":1920,"height":1080},
+              {"ext":"webm","vcodec":"vp9","width":1920,"height":1080},
+              {"ext":"mp4","vcodec":"avc1","width":1280,"height":720},
+              {"ext":"mp4","vcodec":"avc1","width":1080,"height":1920},
+              {"ext":"mp4","vcodec":"avc1","width":2880,"height":1800},
+              {"ext":"mp4","vcodec":"avc1","width":608,"height":1080}
+            ]"#,
+        )
+        .unwrap();
+        // 세로 1080x1920 → 1080, 2880x1800 → 1440, 608x1080 → 480 (YouTube 표시와 같게)
+        assert_eq!(video_heights(&fs), vec![1440, 1080, 720, 480]);
+    }
+
+    #[test]
     fn quality_formats() {
         assert_eq!(format_args("best")[1], "bv*+ba/b");
-        assert!(format_args("1080")[1].contains("height<=1080"));
+        assert!(format_args("1080").contains(&"res:1080".to_string()));
         assert!(format_args("audio").contains(&"-x".to_string()));
+    }
+
+    #[test]
+    fn quality_from_ffprobe() {
+        assert_eq!(quality_from_probe("1920,1080\n").as_deref(), Some("1080"));
+        assert_eq!(quality_from_probe("1080,1920\n").as_deref(), Some("1080"), "세로 영상");
+        assert_eq!(quality_from_probe("1080,608\n").as_deref(), Some("480"));
+        assert_eq!(quality_from_probe("").as_deref(), Some("audio"));
+        assert_eq!(quality_from_probe("N/A,N/A").as_deref(), None);
+    }
+
+    #[test]
+    fn thumbnail_args() {
+        let v = Video { url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ".into(), ..Default::default() };
+        let mut s = Settings::default();
+        let a = build_args(&v, &s);
+        assert!(a.contains(&"--write-thumbnail".to_string()));
+        assert!(a.contains(&"--no-overwrites".to_string()));
+        assert!(!a.contains(&"--convert-thumbnails".to_string()), "원본은 변환하지 않음");
+        s.save_thumbnail = false;
+        assert!(!build_args(&v, &s).iter().any(|x| x.contains("thumbnail")));
     }
 }

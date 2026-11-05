@@ -13,7 +13,7 @@ function mk(videoId: string, title: string, p: Partial<Video> = {}): Video {
     videoId,
     url: `https://www.youtube.com/watch?v=${videoId}`,
     title,
-    channel: "샘플 채널",
+    channel: "Sample channel",
     duration: 245,
     thumbnail: null,
     metaState: "ok",
@@ -26,23 +26,26 @@ function mk(videoId: string, title: string, p: Partial<Video> = {}): Video {
     completedAt: null,
     sizeEstimate: 30_000_000 + ((nextId * 37_000_000) % 400_000_000),
     outputDir: null,
+    heights: [1080, 720, 480, 360, 240, 144],
+    gotQuality: null,
     ...p,
   };
 }
 
 const videos: Video[] = [
-  mk("jNQXAC9IVRw", "Me at the zoo", { status: "downloading", channel: "jawed", duration: 19 }),
-  mk("dQw4w9WgXcQ", "다운로드 순서를 기다리는 영상", { status: "queued", quality: "1080" }),
-  mk("9bZkp7q19f0", "네트워크 오류로 실패한 영상", {
+  mk("jNQXAC9IVRw", "Me at the zoo", { status: "downloading", channel: "jawed", duration: 19, heights: [240, 144] }),
+  mk("dQw4w9WgXcQ", "Video waiting in queue", { status: "queued", quality: "1080", heights: [2160, 1440, 1080, 720, 480, 360, 240, 144] }),
+  mk("9bZkp7q19f0", "Video that failed with a network error", {
     status: "error",
     errorMsg: "unable to download video data: HTTP Error 403: Forbidden",
   }),
-  mk("RgKAFK5djSk", "추가만 해둔 영상", { channel: "가나다 채널", duration: 61, outputDir: "/Users/me/Movies/따로 저장" }),
-  mk("kJQP7kiw5Fk", "비공개로 바뀐 영상", { status: "error", errorMsg: "[youtube] kJQP7kiw5Fk: Private video" }),
-  mk("OPf0YbXqDm0", "완료된 영상", {
+  mk("RgKAFK5djSk", "Video added but not started", { channel: "Another channel", duration: 61, outputDir: "/Users/me/Movies/Separate" }),
+  mk("kJQP7kiw5Fk", "Video that became private", { status: "error", errorMsg: "[youtube] kJQP7kiw5Fk: Private video" }),
+  mk("OPf0YbXqDm0", "Finished video", {
     status: "done",
-    filePath: "/Users/me/Downloads/YT Downloads/완료된 영상 [OPf0YbXqDm0].mp4",
+    filePath: "/Users/me/Downloads/YT Downloads/Finished video [OPf0YbXqDm0].mp4",
     fileSize: 48_000_000,
+    gotQuality: "1080",
     completedAt: now() - 3600,
   }),
 ];
@@ -77,7 +80,8 @@ export function installDevMock() {
           const unrecognized: string[] = [];
           const seen = new Set<string>();
           for (const url of urls) {
-            const id = url.match(/(?:v=|youtu\.be\/|shorts\/)([\w-]{11})/)?.[1];
+            const id =
+              url.match(/(?:v=|youtu\.be\/|shorts\/)([\w-]{11})/)?.[1] ?? url.match(/^([\w-]{11})\.?$/)?.[1];
             if (!id) {
               if (/youtu/.test(url)) unrecognized.push(url);
               continue;
@@ -90,7 +94,7 @@ export function installDevMock() {
             const old = videos.find((v) => v.videoId === id);
             if (old) duplicates.push({ videoId: id, url, title: old.title, status: old.status });
             else {
-              const v = mk(id, `새 영상 ${id}`);
+              const v = mk(id, `New video ${id}`, { metaState: "pending", heights: null });
               videos.push(v);
               added.push(v);
             }
@@ -122,6 +126,23 @@ export function installDevMock() {
           emit("video-updated", { ...v });
           return v;
         }
+        case "plugin:dialog|message": {
+          // confirm()은 눌린 버튼 이름을 돌려받는다
+          const b = a.buttons as { OkCancelCustom?: [string, string]; YesNoCancelCustom?: [string, string, string] } | string;
+          if (typeof b === "object" && b.YesNoCancelCustom) {
+            const [yes, no, cancel] = b.YesNoCancelCustom;
+            if (window.confirm(`${a.message}\n\nOK = ${yes}`)) return yes;
+            return window.confirm(`OK = ${no}`) ? no : cancel;
+          }
+          const [ok, cancel] = typeof b === "object" && b.OkCancelCustom ? b.OkCancelCustom : ["Ok", "Cancel"];
+          return window.confirm(String(a.message)) ? ok : cancel;
+        }
+        case "open_done_file":
+        case "open_done_thumbnail":
+          return;
+        case "trash_done_video":
+          videos.splice(videos.findIndex((v) => v.id === a.id), 1);
+          return;
         case "remove_videos":
           for (const id of a.ids as number[]) videos.splice(videos.findIndex((v) => v.id === id), 1);
           return;

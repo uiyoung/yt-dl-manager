@@ -8,10 +8,10 @@ export interface Sort {
 }
 
 export const SORT_LABELS: Record<SortKey, string> = {
-  date: '날짜',
-  size: '크기',
-  duration: '길이',
-  channel: '채널명',
+  date: 'Date',
+  channel: 'Channel',
+  duration: 'Duration',
+  size: 'Size',
 };
 
 /** 대기열은 추가한 날짜, 완료 목록은 완료한 날짜 */

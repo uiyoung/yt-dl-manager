@@ -56,7 +56,7 @@ pub async fn add_links(app: AppHandle, st: St<'_>, text: String) -> Res<AddResul
                     let url = url_parser::video_url(&id);
                     (id, url)
                 })),
-                Err(err) => playlist_errors.push(format!("재생목록 {}: {err}", found.url)),
+                Err(err) => playlist_errors.push(format!("Playlist {}: {err}", found.url)),
             },
         }
     }
@@ -154,10 +154,77 @@ pub fn remove_videos(st: St, ids: Vec<i64>) -> Res<()> {
 #[tauri::command]
 pub fn set_output_dir(app: AppHandle, st: St, id: i64, dir: Option<String>) -> Res<()> {
     if !db::set_output_dir(&st.conn(), id, dir.as_deref()).map_err(e)? {
-        return Err("받는 중이거나 완료된 영상은 저장 폴더를 바꿀 수 없습니다.".into());
+        return Err("Can't change the save folder of a video that is downloading or done.".into());
     }
     queue::emit_video(&app, &st, id);
     Ok(())
+}
+
+/// 완료한 파일을 기본 앱으로 연다. 화면에 경로 열기 권한을 주지 않고,
+/// 앱이 기록한 이 영상의 파일만 열 수 있게 한다.
+#[tauri::command]
+pub fn open_done_file(app: AppHandle, st: St, id: i64) -> Res<()> {
+    use tauri_plugin_opener::OpenerExt;
+    let v = db::get(&st.conn(), id).map_err(e)?.ok_or("Video not found.")?;
+    let path = v.file_path.ok_or("No file path.")?;
+    if !std::path::Path::new(&path).is_file() {
+        return Err("File not found. It may have been moved or deleted.".into());
+    }
+    app.opener().open_path(path, None::<&str>).map_err(e)
+}
+
+/// 영상 파일과 같은 이름으로 저장된 썸네일 이미지들
+fn thumbnail_files(video: &std::path::Path) -> Vec<std::path::PathBuf> {
+    ["webp", "jpg", "jpeg", "png"]
+        .iter()
+        .map(|ext| video.with_extension(ext))
+        .filter(|p| p.is_file())
+        .collect()
+}
+
+/// 완료한 영상의 썸네일 파일을 기본 앱으로 연다.
+#[tauri::command]
+pub fn open_done_thumbnail(app: AppHandle, st: St, id: i64) -> Res<()> {
+    use tauri_plugin_opener::OpenerExt;
+    let v = db::get(&st.conn(), id).map_err(e)?.ok_or("Video not found.")?;
+    let path = v.file_path.ok_or("No file path.")?;
+    let thumb = thumbnail_files(std::path::Path::new(&path))
+        .into_iter()
+        .next()
+        .ok_or("Thumbnail file not found. It may not have been saved, or was moved or deleted.")?;
+    app.opener()
+        .open_path(thumb.to_string_lossy(), None::<&str>)
+        .map_err(e)
+}
+
+/// 파일들을 휴지통으로 보낸다. macOS에서는 Finder 제어 권한 창이 뜨지 않도록 시스템 API를 쓴다.
+fn move_to_trash(files: &[std::path::PathBuf]) -> Result<(), trash::Error> {
+    #[allow(unused_mut)]
+    let mut ctx = trash::TrashContext::default();
+    #[cfg(target_os = "macos")]
+    {
+        use trash::macos::{DeleteMethod, TrashContextExtMacos};
+        ctx.set_delete_method(DeleteMethod::NsFileManager);
+    }
+    ctx.delete_all(files)
+}
+
+/// 완료한 영상을 목록에서 지우면서 받은 파일과 썸네일을 휴지통으로 보낸다.
+/// 영구 삭제가 아니라 휴지통이라 되살릴 수 있다. 휴지통으로 못 보내면 목록도 그대로 둔다.
+#[tauri::command]
+pub fn trash_done_video(st: St, id: i64) -> Res<()> {
+    let v = db::get(&st.conn(), id).map_err(e)?.ok_or("Video not found.")?;
+    let mut files = Vec::new();
+    if let Some(p) = v.file_path.as_deref().map(std::path::Path::new) {
+        if p.is_file() {
+            files.push(p.to_path_buf());
+        }
+        files.extend(thumbnail_files(p));
+    }
+    if !files.is_empty() {
+        move_to_trash(&files).map_err(|err| format!("Couldn't move the file to the Trash: {err}"))?;
+    }
+    db::delete(&st.conn(), id).map_err(e)
 }
 
 /// 완료한 파일(과 같은 이름의 썸네일)을 다른 폴더로 옮긴다.
@@ -165,41 +232,37 @@ pub fn set_output_dir(app: AppHandle, st: St, id: i64, dir: Option<String>) -> R
 pub fn move_done_file(app: AppHandle, st: St, id: i64, dir: String) -> Res<Video> {
     let v = db::get(&st.conn(), id)
         .map_err(e)?
-        .ok_or("영상을 찾을 수 없습니다.")?;
-    let src = v.file_path.as_deref().ok_or("파일 경로가 없습니다.")?;
+        .ok_or("Video not found.")?;
+    let src = v.file_path.as_deref().ok_or("No file path.")?;
     let src = std::path::Path::new(src);
     if !src.is_file() {
-        return Err("파일이 없습니다. 이미 옮겨졌거나 삭제됐을 수 있습니다.".into());
+        return Err("File not found. It may have been moved or deleted.".into());
     }
     let dest_dir = std::path::Path::new(&dir);
     std::fs::create_dir_all(dest_dir).map_err(e)?;
     let dest = move_file(src, dest_dir)?;
-    // 썸네일: 같은 이름의 .jpg / .webp / .png
-    for ext in ["jpg", "webp", "png"] {
-        let thumb = src.with_extension(ext);
-        if thumb.is_file() {
-            let _ = move_file(&thumb, dest_dir);
-        }
+    for thumb in thumbnail_files(src) {
+        let _ = move_file(&thumb, dest_dir);
     }
     let dest = dest.to_string_lossy().into_owned();
     db::set_file_path(&st.conn(), id, &dest).map_err(e)?;
     queue::emit_video(&app, &st, id);
-    db::get(&st.conn(), id).map_err(e)?.ok_or_else(|| "영상을 찾을 수 없습니다.".into())
+    db::get(&st.conn(), id).map_err(e)?.ok_or_else(|| "Video not found.".into())
 }
 
 /// 같은 디스크면 이름만 바꾸고, 다른 디스크면 복사가 끝난 뒤에 원본을 지운다.
 fn move_file(src: &std::path::Path, dest_dir: &std::path::Path) -> Res<std::path::PathBuf> {
-    let name = src.file_name().ok_or("잘못된 파일 경로입니다.")?;
+    let name = src.file_name().ok_or("Invalid file path.")?;
     let dest = dest_dir.join(name);
     if dest == src {
         return Ok(dest);
     }
     if dest.exists() {
-        return Err(format!("옮길 폴더에 같은 이름의 파일이 이미 있습니다: {}", dest.display()));
+        return Err(format!("A file with the same name already exists there: {}", dest.display()));
     }
     if std::fs::rename(src, &dest).is_err() {
-        std::fs::copy(src, &dest).map_err(|err| format!("파일을 복사하지 못했습니다: {err}"))?;
-        std::fs::remove_file(src).map_err(|err| format!("복사는 됐지만 원본을 지우지 못했습니다: {err}"))?;
+        std::fs::copy(src, &dest).map_err(|err| format!("Couldn't copy the file: {err}"))?;
+        std::fs::remove_file(src).map_err(|err| format!("Copied, but couldn't delete the original: {err}"))?;
     }
     Ok(dest)
 }
@@ -248,7 +311,33 @@ pub async fn check_tools() -> ToolStatus {
 
 #[cfg(test)]
 mod tests {
-    use super::move_file;
+    use super::{move_file, thumbnail_files};
+
+    /// 실제 휴지통에 파일을 하나 넣으므로 평소에는 건너뛴다: cargo test -- --ignored trash
+    #[test]
+    #[ignore]
+    fn trash_moves_files() {
+        let d = std::env::temp_dir().join(format!("ytdm-trash-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let f = d.join("ytdm-trash-test.txt");
+        std::fs::write(&f, b"test").unwrap();
+        super::move_to_trash(&[f.clone()]).unwrap();
+        assert!(!f.exists());
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn finds_thumbnail_next_to_video() {
+        let d = std::env::temp_dir().join(format!("ytdm-thumb-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let video = d.join("Mr. Bean [abc].mp4");
+        std::fs::write(&video, b"v").unwrap();
+        assert!(thumbnail_files(&video).is_empty());
+        std::fs::write(d.join("Mr. Bean [abc].webp"), b"t").unwrap();
+        std::fs::write(d.join("Other [xyz].jpg"), b"t").unwrap();
+        assert_eq!(thumbnail_files(&video), vec![d.join("Mr. Bean [abc].webp")]);
+        std::fs::remove_dir_all(&d).unwrap();
+    }
 
     #[test]
     fn move_file_refuses_to_overwrite() {
