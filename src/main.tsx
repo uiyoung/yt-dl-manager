@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
+import "./index.css";
 import { applyTheme, getTheme } from "./theme";
 
 // 첫 화면이 그려지기 전에 테마를 정해 깜빡임이 없게 한다

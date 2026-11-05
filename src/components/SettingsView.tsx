@@ -3,7 +3,14 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { api } from '../api';
 import { useStore } from '../store';
 import { getTheme, saveTheme, type Theme } from "../theme";
+import { Button, control, cx } from '../ui';
 import { FILENAME_PRESETS, QUALITY_OPTIONS, type Settings, type ToolStatus } from '../types';
+
+const field = 'flex flex-col gap-1.5';
+const narrow = 'max-w-[360px]';
+const label = 'font-semibold';
+// 브라우저 기본 <small> 크기(smaller)를 유지한다
+const hint = 'text-dim [font-size:smaller]';
 
 /** 파일명 템플릿 미리보기 (예시 값으로 대충 치환) */
 function previewName(tpl: string) {
@@ -57,34 +64,37 @@ export function SettingsView() {
   }
 
   return (
-    <div className='view settings'>
-      <label className='field'>
-        <span>Save folder</span>
-        <div className='inline'>
-          <input value={draft.outputDir} onChange={(e) => upd({ outputDir: e.target.value })} />
-          <button onClick={pickFolder}>Choose folder…</button>
+    // 스크롤 영역은 밖으로 나간 부분을 잘라서, 입력칸 포커스 테두리가 들어갈 자리를 좌우 안쪽에 둔다.
+    // 같은 만큼 바깥으로 넓혀 입력칸 위치는 다른 탭과 맞추고, 아래 상태줄이 없으니 바닥과 띄운다.
+    <div className='-mx-1 mb-4 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-1'>
+      <label className={field}>
+        <span className={label}>Save folder</span>
+        <div className='flex gap-2'>
+          <input className={cx(control, 'flex-1')} value={draft.outputDir} onChange={(e) => upd({ outputDir: e.target.value })} />
+          <Button onClick={pickFolder}>Choose folder…</Button>
         </div>
       </label>
 
-      <label className='field'>
-        <span>Default quality</span>
-        <select value={draft.defaultQuality} onChange={(e) => upd({ defaultQuality: e.target.value })}>
+      <label className={field}>
+        <span className={label}>Default quality</span>
+        <select className={control} value={draft.defaultQuality} onChange={(e) => upd({ defaultQuality: e.target.value })}>
           {QUALITY_OPTIONS.map((q) => (
             <option key={q.value} value={q.value}>
               {q.label}
             </option>
           ))}
         </select>
-        <small>
+        <small className={hint}>
           Applies to newly added videos. If a video doesn't offer this quality, the next lower one is used. You can
           change each video's quality in the queue.
         </small>
       </label>
 
-      <label className='field'>
-        <span>Filename pattern</span>
-        <div className='inline'>
+      <label className={field}>
+        <span className={label}>Filename pattern</span>
+        <div className='flex gap-2'>
           <select
+            className={control}
             value={preset ? preset.value : 'custom'}
             onChange={(e) => e.target.value !== 'custom' && upd({ filenameTemplate: e.target.value })}
           >
@@ -96,41 +106,45 @@ export function SettingsView() {
             <option value='custom'>Custom</option>
           </select>
           <input
-            className='mono'
+            className={cx(control, 'flex-1 font-mono text-[13px]')}
             value={draft.filenameTemplate}
             onChange={(e) => upd({ filenameTemplate: e.target.value })}
           />
         </div>
-        <small>
+        <small className={hint}>
           Preview: <code>{previewName(draft.filenameTemplate)}</code> · Available fields: %(title)s, %(id)s,
           %(channel)s, %(upload_date)s, %(ext)s
         </small>
       </label>
 
-      <label className='check'>
+      <label className='flex items-center gap-2'>
         <input
           type='checkbox'
+          // 브라우저 기본 체크박스 여백
+          className='mt-[3px] mr-[3px] mb-[3px] ml-1'
           checked={draft.saveThumbnail}
           onChange={(e) => upd({ saveThumbnail: e.target.checked })}
         />
         Also save the thumbnail image
       </label>
 
-      <label className='field narrow'>
-        <span>Concurrent downloads</span>
+      <label className={cx(field, narrow)}>
+        <span className={label}>Concurrent downloads</span>
         <input
           type='number'
+          className={control}
           min={1}
           max={8}
           value={draft.concurrency}
           onChange={(e) => upd({ concurrency: Number(e.target.value) })}
         />
-        <small>If you start more videos than this, the rest wait as Queued.</small>
+        <small className={hint}>If you start more videos than this, the rest wait as Queued.</small>
       </label>
 
-      <label className='field narrow'>
-        <span>Theme</span>
+      <label className={cx(field, narrow)}>
+        <span className={label}>Theme</span>
         <select
+          className={control}
           value={theme}
           onChange={(e) => {
             const t = e.target.value as Theme;
@@ -142,25 +156,25 @@ export function SettingsView() {
           <option value='light'>Light</option>
           <option value='dark'>Dark</option>
         </select>
-        <small>Applies right away. System follows your macOS or Windows appearance setting.</small>
+        <small className={hint}>Applies right away. System follows your macOS or Windows appearance setting.</small>
       </label>
 
-      <div className='toolbar'>
-        <button className='primary' onClick={save} disabled={!dirty}>
+      <div className='flex items-center gap-2'>
+        <Button variant='primary' onClick={save} disabled={!dirty}>
           Save settings
-        </button>
-        {dirty && <button onClick={() => setDraft(saved)}>Revert</button>}
-        {msg && !dirty && <span className='dim'>{msg}</span>}
+        </Button>
+        {dirty && <Button onClick={() => setDraft(saved)}>Revert</Button>}
+        {msg && !dirty && <span className='text-dim'>{msg}</span>}
       </div>
 
-      <div className='tools'>
+      <div className='flex gap-4 border-t border-line pt-2 text-[12px] text-dim'>
         <div>
           yt-dlp:{' '}
-          {tools == null ? 'Checking…' : tools.ytdlp ? <b>{tools.ytdlp}</b> : <b className='err-text'>Not found</b>}
+          {tools == null ? 'Checking…' : tools.ytdlp ? <b>{tools.ytdlp}</b> : <b className='text-error'>Not found</b>}
         </div>
         <div>
           ffmpeg:{' '}
-          {tools == null ? 'Checking…' : tools.ffmpeg ? <b>Available</b> : <b className='err-text'>Not found</b>}
+          {tools == null ? 'Checking…' : tools.ffmpeg ? <b>Available</b> : <b className='text-error'>Not found</b>}
         </div>
       </div>
     </div>

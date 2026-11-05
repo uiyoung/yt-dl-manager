@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { MoreIcon } from "./icons";
+import { Button, buttonBase, cx } from "../ui";
 
 export type MenuItem =
   | { label: string; onClick: () => void; disabled?: boolean; danger?: boolean; hint?: string }
@@ -52,9 +53,11 @@ export function RowMenu({ items }: { items: MenuItem[] }) {
 
   return (
     <>
-      <button
+      <Button
         ref={btn}
-        className={`ghost icon-btn${open ? " active" : ""}`}
+        variant="ghost"
+        icon
+        active={open}
         title="More"
         aria-label="More"
         aria-haspopup="menu"
@@ -65,23 +68,27 @@ export function RowMenu({ items }: { items: MenuItem[] }) {
         }}
       >
         <MoreIcon />
-      </button>
+      </Button>
       {open &&
         createPortal(
           <div
             ref={menu}
-            className="menu"
+            className="fixed z-100 flex min-w-[200px] flex-col rounded-lg border border-line bg-panel p-1 shadow-[0_8px_24px_rgba(0,0,0,0.18)]"
             role="menu"
             style={pos ? { top: pos.top, left: pos.left } : { visibility: "hidden", top: 0, left: 0 }}
           >
             {items.map((it, i) =>
               it === "separator" ? (
-                <div key={i} className="menu-sep" />
+                <div key={i} className="mx-0.5 my-1 h-px bg-line" />
               ) : (
                 <button
                   key={i}
                   role="menuitem"
-                  className={it.danger ? "danger" : ""}
+                  className={cx(
+                    buttonBase,
+                    "justify-start rounded-[5px] px-2.5 py-[7px] text-left enabled:hover:bg-hover",
+                    it.danger && "text-error",
+                  )}
                   disabled={it.disabled}
                   title={it.hint}
                   onClick={() => {

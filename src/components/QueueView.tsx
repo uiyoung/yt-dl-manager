@@ -13,23 +13,27 @@ import { QualitySelect } from './QualitySelect';
 import { RowMenu, type MenuItem } from './RowMenu';
 import { SortControl } from './SortControl';
 import { DownloadIcon, RetryIcon, StopIcon, TrashIcon } from './icons';
+import { actionsClass, Badge, Button, cx, emptyClass, listClass, rowClass, thumbClass, viewClass } from '../ui';
+
+const statusLine = 'flex min-w-0 items-center gap-2 text-[12px]';
+const bar = 'relative h-1.5 max-w-[320px] flex-1 overflow-hidden rounded-[3px] bg-bar';
 
 const ProgressInfo = memo(function ProgressInfo({ id }: { id: number }) {
   const p = useStore((s) => s.progress[id]);
-  if (!p) return <div className='status-line'>Starting…</div>;
+  if (!p) return <div className={statusLine}>Starting…</div>;
   if (p.stage === 'processing')
     return (
-      <div className='status-line'>
-        <div className='bar indeterminate' />
+      <div className={statusLine}>
+        <div className={cx(bar, "after:absolute after:inset-0 after:w-[30%] after:animate-slide after:bg-highlight after:content-['']")} />
         <span>Processing file…</span>
       </div>
     );
   return (
-    <div className='status-line'>
-      <div className='bar'>
-        <div className='fill' style={{ width: `${p.percent}%` }} />
+    <div className={statusLine}>
+      <div className={bar}>
+        <div className='h-full bg-highlight transition-[width] duration-250 ease-linear' style={{ width: `${p.percent}%` }} />
       </div>
-      <span className='nums'>
+      <span className='whitespace-nowrap text-dim tabular-nums'>
         {p.percent.toFixed(1)}%{p.total ? ` · ${fmtBytes(p.total)}` : ''}
         {p.speed ? ` · ${fmtBytes(p.speed)}/s` : ''}
         {p.eta != null ? ` · ${fmtDuration(p.eta)} left` : ''}
@@ -44,21 +48,21 @@ function StatusCell({ v }: { v: Video }) {
       return <ProgressInfo id={v.id} />;
     case 'queued':
       return (
-        <div className='status-line'>
-          <span className='badge pending'>Queued</span>
+        <div className={statusLine}>
+          <Badge tone='info'>Queued</Badge>
         </div>
       );
     case 'error':
       return (
-        <div className='status-line error' title={v.errorMsg ?? ''}>
-          <span className='badge error'>Failed</span>
-          <span className='err-text'>{v.errorMsg}</span>
+        <div className={statusLine} title={v.errorMsg ?? ''}>
+          <Badge tone='error'>Failed</Badge>
+          <span className='min-w-0 truncate text-error'>{v.errorMsg}</span>
         </div>
       );
     default:
       return (
-        <div className='status-line'>
-          <span className='badge'>Ready</span>
+        <div className={statusLine}>
+          <Badge>Ready</Badge>
         </div>
       );
   }
@@ -69,22 +73,22 @@ function RowAction({ v }: { v: Video }) {
   switch (v.status) {
     case 'ready':
       return (
-        <button onClick={() => api.download([v.id])}>
+        <Button onClick={() => api.download([v.id])}>
           <DownloadIcon /> Download
-        </button>
+        </Button>
       );
     case 'error':
       return (
-        <button className='retry' onClick={() => api.download([v.id])}>
+        <Button variant='retry' onClick={() => api.download([v.id])}>
           <RetryIcon /> Retry
-        </button>
+        </Button>
       );
     case 'queued':
     case 'downloading':
       return (
-        <button onClick={() => api.stop([v.id])}>
+        <Button onClick={() => api.stop([v.id])}>
           <StopIcon /> Stop
-        </button>
+        </Button>
       );
     default:
       return null;
@@ -148,7 +152,13 @@ const QueueRow = memo(function QueueRow({
   const size = v.sizeEstimate ? `~${fmtBytes(v.sizeEstimate)}` : null;
   return (
     <li
-      className={`row selectable status-${v.status}${checked ? ' selected' : ''}`}
+      className={cx(
+        rowClass,
+        'cursor-pointer',
+        'focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-highlight',
+        // 선택: 배경과 왼쪽 강조색 세로줄
+        checked ? 'bg-selected shadow-[inset_3px_0_0_var(--highlight)]' : 'hover:bg-hover',
+      )}
       aria-selected={checked}
       // 키보드: Tab으로 행에 와서 Space로 선택 켜기/끄기
       tabIndex={0}
@@ -167,12 +177,12 @@ const QueueRow = memo(function QueueRow({
         onCheck(id, !checked, e.shiftKey);
       }}
     >
-      <img className='thumb' src={thumbUrl(v.videoId)} alt='' loading='lazy' />
-      <div className='info'>
-        <div className='title' title={v.title ?? v.url}>
+      <img className={thumbClass} src={thumbUrl(v.videoId)} alt='' loading='lazy' />
+      <div className='flex min-w-0 flex-1 flex-col gap-[3px]'>
+        <div className='truncate font-semibold' title={v.title ?? v.url}>
           {v.title ?? (v.metaState === 'pending' ? 'Loading info…' : v.url)}
         </div>
-        <div className='meta'>
+        <div className='text-[12px] text-dim'>
           {[v.channel, fmtDuration(v.duration)].filter(Boolean).join(' · ')}
           {size && (
             <span title='Estimated size at best quality'>
@@ -182,24 +192,26 @@ const QueueRow = memo(function QueueRow({
           )}
         </div>
         {v.outputDir && (
-          <div className='meta folder' title={v.outputDir}>
+          <div className='truncate text-[12px] text-dim' title={v.outputDir}>
             Save folder: {v.outputDir}
           </div>
         )}
         <StatusCell v={v} />
       </div>
       <QualitySelect v={v} />
-      <div className='actions'>
+      <div className={actionsClass}>
         <RowAction v={v} />
         <RowMenu items={menuItems(v)} />
-        <button
-          className='ghost icon-btn danger-hover'
+        <Button
+          variant='ghost'
+          icon
+          dangerHover
           title='Remove from list (downloaded file is kept)'
           aria-label='Remove from list'
           onClick={() => removeVideos([v.id])}
         >
           <TrashIcon />
-        </button>
+        </Button>
       </div>
     </li>
   );
@@ -251,7 +263,7 @@ export function QueueView() {
         e.key === 'Escape' &&
         // 열린 메뉴가 있으면 Esc는 메뉴만 닫는다
         !document.querySelector('[role=menu]') &&
-        document.querySelector('.row.selected')
+        document.querySelector('li[aria-selected="true"]')
       ) {
         clearSelection();
       }
@@ -281,11 +293,12 @@ export function QueueView() {
   const allChecked = ids.length > 0 && counts.sel === ids.length;
 
   return (
-    <div className='view'>
-      <div className='toolbar'>
-        <label className='check select-all' title='Select all'>
+    <div className={viewClass}>
+      <div className='flex items-center gap-2'>
+        <label className='flex min-w-[108px] cursor-pointer items-center gap-2 pr-1.5 pl-3 text-dim' title='Select all'>
           <input
             type='checkbox'
+            className='m-0 size-4 shrink-0 cursor-pointer accent-highlight'
             checked={allChecked}
             ref={(el) => {
               if (el) el.indeterminate = counts.sel > 0 && !allChecked;
@@ -295,27 +308,27 @@ export function QueueView() {
           />
           {counts.sel ? `${counts.sel} selected` : 'Select all'}
         </label>
-        <button className='primary' disabled={!counts.selStartable} onClick={() => api.download(selectedIds())}>
+        <Button variant='primary' disabled={!counts.selStartable} onClick={() => api.download(selectedIds())}>
           <DownloadIcon /> Download selected{counts.selStartable ? ` (${counts.selStartable})` : ''}
-        </button>
-        <button disabled={!counts.selStoppable} onClick={() => api.stop(selectedIds())}>
+        </Button>
+        <Button disabled={!counts.selStoppable} onClick={() => api.stop(selectedIds())}>
           <StopIcon /> Stop selected
-        </button>
-        <button
+        </Button>
+        <Button
           disabled={!counts.sel}
           onClick={() => removeVideos(selectedIds())}
           title='Remove selected videos from the list'
         >
           <TrashIcon /> Remove selected
-        </button>
-        <span className='spacer' />
+        </Button>
+        <span className='flex-1' />
         <SortControl sort={sort} onChange={setSort} dateLabel='Date added' />
       </div>
 
       {ids.length === 0 ? (
-        <div className='empty'>The queue is empty. Paste links above to add videos.</div>
+        <div className={emptyClass}>The queue is empty. Paste links above to add videos.</div>
       ) : (
-        <ul className='list'>
+        <ul className={listClass}>
           {ids.map((id) => (
             <QueueRow key={id} id={id} onCheck={onCheck} />
           ))}

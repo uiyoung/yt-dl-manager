@@ -6,9 +6,18 @@ import { QueueView } from './components/QueueView';
 import { DoneView } from './components/DoneView';
 import { SettingsView } from './components/SettingsView';
 import { Toast } from './toast';
-import './App.css';
+import { buttonBase, cx } from './ui';
 
 type Tab = 'queue' | 'done' | 'settings';
+
+/** 탭 버튼: 아래 밑줄로 현재 탭을 표시 */
+function tabClass(active: boolean) {
+  return cx(
+    buttonBase,
+    'border-b-2 px-3.5 py-2 enabled:hover:bg-hover',
+    active ? 'border-highlight font-semibold text-fg' : 'border-transparent text-dim',
+  );
+}
 
 /** 아래 상태줄: 탭마다 그 탭의 건수를 보여준다 (settings에서는 보이지 않음) */
 function StatusBar({ tab }: { tab: Tab }) {
@@ -33,7 +42,7 @@ function StatusBar({ tab }: { tab: Tab }) {
   } else if (tab === 'done') {
     text = `Done ${c.done}`;
   }
-  return <footer className='footer'>{text}</footer>;
+  return <footer className='truncate pt-2 pb-2.5 text-[12px] text-dim'>{text}</footer>;
 }
 
 export default function App() {
@@ -50,22 +59,22 @@ export default function App() {
   }, []);
 
   return (
-    <main className='app'>
+    <main className='flex h-screen flex-col gap-3 px-4 pt-4'>
       <AddPanel />
-      <nav className='tabs'>
-        <button className={tab === 'queue' ? 'active' : ''} onClick={() => setTab('queue')}>
+      <nav className='flex gap-1 border-b border-line'>
+        <button className={tabClass(tab === 'queue')} onClick={() => setTab('queue')}>
           queue
-          <span className='count'>{queueCount}</span>
+          <span className='ml-1 rounded-[10px] bg-hover px-[7px] py-px text-[12px]'>{queueCount}</span>
         </button>
-        <button className={tab === 'done' ? 'active' : ''} onClick={() => setTab('done')}>
+        <button className={tabClass(tab === 'done')} onClick={() => setTab('done')}>
           done
           {/* <span className='count'>{doneCount}</span> */}
         </button>
-        <button className={tab === 'settings' ? 'active' : ''} onClick={() => setTab('settings')}>
+        <button className={tabClass(tab === 'settings')} onClick={() => setTab('settings')}>
           settings
         </button>
       </nav>
-      {error && <div className='notice error'>{error}</div>}
+      {error && <div className='rounded-md bg-error-bg px-2.5 py-2 text-error'>{error}</div>}
       {tab === 'queue' && <QueueView />}
       {tab === 'done' && <DoneView />}
       {tab === 'settings' && <SettingsView />}

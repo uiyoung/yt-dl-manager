@@ -14,7 +14,7 @@ import {
 
 function icon(Icon: LucideIcon) {
   return function AppIcon() {
-    return <Icon className="icon" size={16} strokeWidth={2} aria-hidden />;
+    return <Icon className="shrink-0" size={16} strokeWidth={2} aria-hidden />;
   };
 }
 
@@ -28,5 +28,5 @@ export const CloseIcon = icon(X);
 
 export function SortDirIcon({ desc }: { desc: boolean }) {
   const Icon = desc ? ArrowDown : ArrowUp;
-  return <Icon className="icon" size={16} strokeWidth={2} aria-hidden />;
+  return <Icon className="shrink-0" size={16} strokeWidth={2} aria-hidden />;
 }

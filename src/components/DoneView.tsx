@@ -13,6 +13,7 @@ import { heightLabel } from "./QualitySelect";
 import { RowMenu, type MenuItem } from "./RowMenu";
 import { SortControl } from "./SortControl";
 import { PlayIcon, TrashIcon } from "./icons";
+import { actionsClass, Button, control, cx, emptyClass, listClass, rowClass, thumbClass, viewClass } from "../ui";
 
 const qualityLabel = (q: string) =>
   /^\d+$/.test(q) ? heightLabel(Number(q)) : (QUALITY_OPTIONS.find((o) => o.value === q)?.label ?? q);
@@ -86,56 +87,67 @@ export function DoneView() {
   }, [done, query, sort]);
 
   return (
-    <div className="view">
-      <div className="toolbar">
-        <input className="search" placeholder="Search title or channel" value={query} onChange={(e) => setQuery(e.target.value)} />
-        <span className="spacer" />
+    <div className={viewClass}>
+      <div className="flex items-center gap-2">
+        <input className={cx(control, "w-[260px]")} placeholder="Search title or channel" value={query} onChange={(e) => setQuery(e.target.value)} />
+        <span className="flex-1" />
         <SortControl sort={sort} onChange={setSort} dateLabel="Date completed" />
       </div>
       {list.length === 0 ? (
-        <div className="empty">{done.length ? "No results." : "No completed downloads yet."}</div>
+        <div className={emptyClass}>{done.length ? "No results." : "No completed downloads yet."}</div>
       ) : (
-        <ul className="list">
+        <ul className={listClass}>
           {list.map((v) => (
-            <li key={v.id} className="row">
+            <li key={v.id} className={rowClass}>
               <button
-                className="thumb-btn"
+                // 마우스를 올리면 썸네일을 밝게 하고 강조색 테두리
+                className="group shrink-0 cursor-pointer rounded-[4px] leading-[0] disabled:cursor-default"
                 title="Open thumbnail"
                 aria-label="Open thumbnail"
                 disabled={!v.filePath}
                 onClick={() => tryOpen(() => api.openDoneThumbnail(v.id))}
               >
-                <img className="thumb" src={thumbUrl(v.videoId)} alt="" loading="lazy" />
+                <img
+                  className={cx(
+                    thumbClass,
+                    "group-enabled:group-hover:outline-2 group-enabled:group-hover:outline-offset-1 group-enabled:group-hover:outline-highlight group-enabled:group-hover:brightness-[1.15]",
+                  )}
+                  src={thumbUrl(v.videoId)}
+                  alt=""
+                  loading="lazy"
+                />
               </button>
-              <div className="info">
-                <div className="title" title={v.filePath ?? ""}>
+              <div className="flex min-w-0 flex-1 flex-col gap-[3px]">
+                <div className="truncate font-semibold" title={v.filePath ?? ""}>
                   {v.title ?? v.url}
                 </div>
-                <div className="meta">
+                <div className="text-[12px] text-dim">
                   {[v.channel, fmtDuration(v.duration), qualityLabel(v.gotQuality ?? v.quality), fmtBytes(v.fileSize)]
                     .filter(Boolean)
                     .join(" · ")}
                 </div>
-                <div className="meta dim">Completed {fmtDate(v.completedAt)}</div>
+                <div className="text-[12px] text-dim">Completed {fmtDate(v.completedAt)}</div>
               </div>
-              <div className="actions">
+              <div className={actionsClass}>
                 {v.filePath && (
                   <>
-                    <button onClick={() => tryOpen(() => api.openDoneFile(v.id))}>
+                    <Button onClick={() => tryOpen(() => api.openDoneFile(v.id))}>
                       <PlayIcon /> Play
-                    </button>
-                    <button onClick={() => tryOpen(() => revealItemInDir(v.filePath!))}>Show in folder</button>
+                    </Button>
+                    <Button onClick={() => tryOpen(() => revealItemInDir(v.filePath!))}>Show in folder</Button>
                   </>
                 )}
                 <RowMenu items={menuItems(v)} />
-                <button
-                  className="ghost icon-btn danger-hover"
+                <Button
+                  variant="ghost"
+                  icon
+                  dangerHover
                   title="Remove (choose whether to keep the file)"
                   aria-label="Remove"
                   onClick={() => removeOne(v)}
                 >
                   <TrashIcon />
-                </button>
+                </Button>
               </div>
             </li>
           ))}

@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { cx } from "./ui";
 
 interface ToastState {
   message: string | null;
@@ -24,7 +25,13 @@ export function Toast() {
   const { message, tone } = useToast();
   if (!message) return null;
   return (
-    <div className={`toast ${tone}`} role="status">
+    <div
+      role="status"
+      className={cx(
+        "fixed bottom-9 left-1/2 z-200 max-w-[80vw] -translate-x-1/2 rounded-lg px-3.5 py-2 shadow-[0_6px_20px_rgba(0,0,0,0.2)]",
+        tone === "error" ? "bg-error text-white" : "bg-fg text-bg",
+      )}
+    >
       {message}
     </div>
   );
