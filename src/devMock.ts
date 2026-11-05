@@ -24,6 +24,8 @@ function mk(videoId: string, title: string, p: Partial<Video> = {}): Video {
     errorMsg: null,
     createdAt: now(),
     completedAt: null,
+    sizeEstimate: 30_000_000 + ((nextId * 37_000_000) % 400_000_000),
+    outputDir: null,
     ...p,
   };
 }
@@ -35,7 +37,7 @@ const videos: Video[] = [
     status: "error",
     errorMsg: "unable to download video data: HTTP Error 403: Forbidden",
   }),
-  mk("RgKAFK5djSk", "추가만 해둔 영상"),
+  mk("RgKAFK5djSk", "추가만 해둔 영상", { channel: "가나다 채널", duration: 61, outputDir: "/Users/me/Movies/따로 저장" }),
   mk("kJQP7kiw5Fk", "비공개로 바뀐 영상", { status: "error", errorMsg: "[youtube] kJQP7kiw5Fk: Private video" }),
   mk("OPf0YbXqDm0", "완료된 영상", {
     status: "done",
@@ -68,19 +70,32 @@ export function installDevMock() {
         case "check_tools":
           return { ytdlp: "2026.10.26 (mock)", ffmpeg: true };
         case "add_links": {
-          const ids = [...String(a.text).matchAll(/(?:v=|youtu\.be\/)([\w-]{11})/g)].map((m) => m[1]);
+          const urls = String(a.text).match(/\S+/g) ?? [];
           const added: Video[] = [];
           const duplicates = [];
-          for (const id of new Set(ids)) {
+          const pasteDuplicates: string[] = [];
+          const unrecognized: string[] = [];
+          const seen = new Set<string>();
+          for (const url of urls) {
+            const id = url.match(/(?:v=|youtu\.be\/|shorts\/)([\w-]{11})/)?.[1];
+            if (!id) {
+              if (/youtu/.test(url)) unrecognized.push(url);
+              continue;
+            }
+            if (seen.has(id)) {
+              pasteDuplicates.push(url);
+              continue;
+            }
+            seen.add(id);
             const old = videos.find((v) => v.videoId === id);
-            if (old) duplicates.push({ videoId: id, title: old.title, status: old.status });
+            if (old) duplicates.push({ videoId: id, url, title: old.title, status: old.status });
             else {
               const v = mk(id, `새 영상 ${id}`);
               videos.push(v);
               added.push(v);
             }
           }
-          return { added, duplicates, pasteDuplicates: ids.length - new Set(ids).size, unrecognized: [], playlistErrors: [] };
+          return { added, duplicates, pasteDuplicates, unrecognized, playlistErrors: [] };
         }
         case "download_videos":
         case "stop_videos": {
@@ -94,6 +109,18 @@ export function installDevMock() {
               emit("video-updated", { ...v });
             }
           return;
+        }
+        case "set_output_dir": {
+          const v = videos.find((x) => x.id === a.id)!;
+          v.outputDir = (a.dir as string | null) ?? null;
+          emit("video-updated", { ...v });
+          return;
+        }
+        case "move_done_file": {
+          const v = videos.find((x) => x.id === a.id)!;
+          v.filePath = `${a.dir}/${v.filePath!.split("/").pop()}`;
+          emit("video-updated", { ...v });
+          return v;
         }
         case "remove_videos":
           for (const id of a.ids as number[]) videos.splice(videos.findIndex((v) => v.id === id), 1);

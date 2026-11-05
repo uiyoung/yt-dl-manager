@@ -40,6 +40,8 @@ pub fn run() {
             commands::download_videos,
             commands::stop_videos,
             commands::set_quality,
+            commands::set_output_dir,
+            commands::move_done_file,
             commands::remove_videos,
             commands::get_settings,
             commands::save_settings,

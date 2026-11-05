@@ -1,9 +1,16 @@
 import { memo, useRef } from "react";
 import { useShallow } from "zustand/react/shallow";
+import { open } from "@tauri-apps/plugin-dialog";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { api } from "../api";
 import { useStore } from "../store";
 import { fmtBytes, fmtDuration, thumbUrl } from "../format";
+import { sortVideos, useSort } from "../sort";
+import { copyText, toast } from "../toast";
 import { QUALITY_OPTIONS, type Video } from "../types";
+import { RowMenu, type MenuItem } from "./RowMenu";
+import { SortControl } from "./SortControl";
+import { TrashIcon } from "./icons";
 
 const ProgressInfo = memo(function ProgressInfo({ id }: { id: number }) {
   const p = useStore((s) => s.progress[id]);
@@ -75,6 +82,45 @@ function RowAction({ v }: { v: Video }) {
   }
 }
 
+async function removeVideos(ids: number[]) {
+  await api.remove(ids);
+  useStore.getState().remove(ids);
+}
+
+function menuItems(v: Video): MenuItem[] {
+  const editable = v.status === "ready" || v.status === "error";
+  const items: MenuItem[] = [
+    { label: "YouTube에서 열기", onClick: () => openUrl(v.url) },
+    { label: "YouTube 링크 복사", onClick: () => copyText(v.url, "링크를 복사했습니다") },
+    "separator",
+    {
+      label: "저장 폴더 변경…",
+      disabled: !editable,
+      hint: editable ? undefined : "받는 중이거나 순서를 기다리는 영상은 바꿀 수 없습니다",
+      onClick: async () => {
+        const defaultPath = v.outputDir ?? useStore.getState().settings?.outputDir;
+        const dir = await open({ directory: true, defaultPath, title: "이 영상을 저장할 폴더" });
+        if (typeof dir !== "string") return;
+        try {
+          await api.setOutputDir(v.id, dir);
+          toast("저장 폴더를 바꿨습니다");
+        } catch (e) {
+          toast(String(e), "error");
+        }
+      },
+    },
+  ];
+  if (v.outputDir)
+    items.push({
+      label: "기본 저장 폴더로 되돌리기",
+      disabled: !editable,
+      onClick: () => api.setOutputDir(v.id, null).catch((e) => toast(String(e), "error")),
+    });
+  if (v.errorMsg) items.push({ label: "오류 메시지 복사", onClick: () => copyText(v.errorMsg!) });
+  items.push("separator", { label: "목록에서 제거", danger: true, onClick: () => removeVideos([v.id]) });
+  return items;
+}
+
 const QueueRow = memo(function QueueRow({
   id,
   onCheck,
@@ -84,8 +130,8 @@ const QueueRow = memo(function QueueRow({
 }) {
   const v = useStore((s) => s.videos[id]);
   const checked = useStore((s) => !!s.selected[id]);
-  const remove = useStore((s) => s.remove);
   if (!v) return null;
+  const size = v.sizeEstimate ? `약 ${fmtBytes(v.sizeEstimate)}` : null;
   return (
     <li className={`row status-${v.status}${checked ? " selected" : ""}`}>
       <input
@@ -101,7 +147,20 @@ const QueueRow = memo(function QueueRow({
         <div className="title" title={v.title ?? v.url}>
           {v.title ?? (v.metaState === "pending" ? "정보 불러오는 중…" : v.url)}
         </div>
-        <div className="meta">{[v.channel, fmtDuration(v.duration)].filter(Boolean).join(" · ")}</div>
+        <div className="meta">
+          {[v.channel, fmtDuration(v.duration)].filter(Boolean).join(" · ")}
+          {size && (
+            <span title="최고화질 기준 예상 크기">
+              {v.channel || v.duration ? " · " : ""}
+              {size}
+            </span>
+          )}
+        </div>
+        {v.outputDir && (
+          <div className="meta folder" title={v.outputDir}>
+            저장 폴더: {v.outputDir}
+          </div>
+        )}
         <StatusCell v={v} />
       </div>
       <select
@@ -118,15 +177,14 @@ const QueueRow = memo(function QueueRow({
       </select>
       <div className="actions">
         <RowAction v={v} />
+        <RowMenu items={menuItems(v)} />
         <button
-          className="ghost"
-          title="목록에서 제거"
-          onClick={async () => {
-            await api.remove([v.id]);
-            remove([v.id]);
-          }}
+          className="ghost icon-btn danger-hover"
+          title="목록에서 제거 (받은 파일은 지우지 않음)"
+          aria-label="목록에서 제거"
+          onClick={() => removeVideos([v.id])}
         >
-          ✕
+          <TrashIcon />
         </button>
       </div>
     </li>
@@ -134,12 +192,14 @@ const QueueRow = memo(function QueueRow({
 });
 
 export function QueueView() {
+  const [sort, setSort] = useSort("sort.queue", { key: "date", desc: false });
   const ids = useStore(
     useShallow((s) =>
-      Object.values(s.videos)
-        .filter((v) => v.status !== "done")
-        .sort((a, b) => a.id - b.id)
-        .map((v) => v.id),
+      sortVideos(
+        Object.values(s.videos).filter((v) => v.status !== "done"),
+        sort,
+        "queue",
+      ).map((v) => v.id),
     ),
   );
   const counts = useStore(
@@ -163,13 +223,12 @@ export function QueueView() {
   );
   const setSelected = useStore((s) => s.setSelected);
   const clearSelection = useStore((s) => s.clearSelection);
-  const remove = useStore((s) => s.remove);
   const lastClicked = useRef<number | null>(null);
 
   const idsRef = useRef(ids);
   idsRef.current = ids;
 
-  // Shift+클릭으로 범위 선택
+  // Shift+클릭으로 범위 선택 (지금 보이는 정렬 순서 기준)
   const onCheck = useRef((id: number, on: boolean, shift: boolean) => {
     const list = idsRef.current;
     const from = lastClicked.current != null ? list.indexOf(lastClicked.current) : -1;
@@ -210,20 +269,14 @@ export function QueueView() {
         <button disabled={!counts.selStoppable} onClick={() => api.stop(selectedIds())}>
           ■ 선택 중지
         </button>
-        <button
-          disabled={!counts.sel}
-          onClick={async () => {
-            const sel = selectedIds();
-            await api.remove(sel);
-            remove(sel);
-          }}
-        >
-          선택 제거
+        <button disabled={!counts.sel} onClick={() => removeVideos(selectedIds())} title="선택한 영상을 목록에서 제거">
+          <TrashIcon /> 선택 제거
         </button>
         <span className="spacer" />
         <span className="counts">
           준비 {counts.ready} · 진행/대기 {counts.active} · 실패 {counts.failed}
         </span>
+        <SortControl sort={sort} onChange={setSort} dateLabel="추가한 날짜순" />
       </div>
       {ids.length === 0 ? (
         <div className="empty">대기열이 비어 있습니다. 위에 링크를 붙여넣어 추가하세요.</div>

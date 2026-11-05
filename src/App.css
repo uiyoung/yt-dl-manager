@@ -132,7 +132,7 @@ textarea {
   border-radius: 6px;
   background: var(--hover);
 }
-.notice span {
+.notice > span {
   flex: 1;
 }
 .notice.ok {
@@ -290,7 +290,7 @@ button.retry {
   justify-content: flex-end;
   gap: 6px;
   flex-shrink: 0;
-  min-width: 150px;
+  min-width: 190px;
 }
 .row > select {
   width: 130px;
@@ -436,4 +436,141 @@ button.retry {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ---------- 아이콘 버튼 · 메뉴 · 정렬 ---------- */
+button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+.icon-btn {
+  padding: 6px;
+  width: 32px;
+  height: 32px;
+}
+button.ghost.icon-btn:hover:not(:disabled),
+button.ghost.icon-btn.active {
+  background: var(--hover);
+  color: var(--text);
+}
+button.ghost.danger-hover:hover:not(:disabled) {
+  color: var(--error);
+  background: var(--error-bg);
+}
+
+.menu {
+  position: fixed;
+  z-index: 100;
+  min-width: 200px;
+  padding: 4px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  display: flex;
+  flex-direction: column;
+}
+.menu button {
+  justify-content: flex-start;
+  border: none;
+  background: transparent;
+  padding: 7px 10px;
+  border-radius: 5px;
+  text-align: left;
+}
+.menu button:hover:not(:disabled) {
+  background: var(--hover);
+}
+.menu button.danger {
+  color: var(--error);
+}
+.menu-sep {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--border);
+}
+
+.sort-control {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.sort-control select {
+  height: 32px;
+}
+
+.meta.folder {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- 추가 결과 상세 ---------- */
+.notice {
+  align-items: flex-start;
+}
+.notice-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.detail summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 12px;
+}
+.detail ul {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0 0 0 14px;
+  max-height: 140px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  color: var(--text);
+  font-size: 12px;
+}
+.detail li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.detail-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 40%;
+}
+.url {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  color: var(--dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: text;
+}
+
+/* ---------- 알림 토스트 ---------- */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 36px;
+  transform: translateX(-50%);
+  z-index: 200;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: var(--text);
+  color: var(--bg);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+  max-width: 80vw;
+}
+.toast.error {
+  background: var(--error);
+  color: #fff;
 }

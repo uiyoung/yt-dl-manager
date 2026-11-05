@@ -4,6 +4,7 @@ import { AddPanel } from './components/AddPanel';
 import { QueueView } from './components/QueueView';
 import { DoneView } from './components/DoneView';
 import { SettingsView } from './components/SettingsView';
+import { Toast } from './toast';
 import './App.css';
 
 type Tab = 'queue' | 'done' | 'settings';
@@ -42,6 +43,7 @@ export default function App() {
       {tab === 'queue' && <QueueView />}
       {tab === 'done' && <DoneView />}
       {tab === 'settings' && <SettingsView />}
+      <Toast />
       <footer className='footer' title={outputDir}>
         저장 폴더: {outputDir ?? ''}
       </footer>

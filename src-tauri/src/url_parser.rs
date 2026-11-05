@@ -11,12 +11,19 @@ pub enum Link {
     Playlist(String),
 }
 
+/// 찾은 링크와 사용자가 붙여넣은 원래 주소
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Found {
+    pub link: Link,
+    pub url: String,
+}
+
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct ParseResult {
     /// 붙여넣기 안에서 중복을 제거한 링크 (입력 순서 유지)
-    pub links: Vec<Link>,
-    /// 붙여넣기 안에서 겹쳐서 제외된 개수
-    pub paste_duplicates: usize,
+    pub links: Vec<Found>,
+    /// 붙여넣기 안에서 앞에 나온 링크와 겹쳐서 제외된 주소
+    pub paste_duplicates: Vec<String>,
     /// YouTube 주소처럼 보이지만 영상/재생목록을 찾지 못한 링크
     pub unrecognized: Vec<String>,
 }
@@ -56,12 +63,13 @@ pub fn classify(url: &str) -> Option<Link> {
 pub fn parse_links(text: &str) -> ParseResult {
     let mut res = ParseResult::default();
     for m in URL_RE.find_iter(text) {
-        match classify(m.as_str()) {
+        let url = m.as_str().to_string();
+        match classify(&url) {
             Some(link) => {
-                if res.links.contains(&link) {
-                    res.paste_duplicates += 1;
+                if res.links.iter().any(|f| f.link == link) {
+                    res.paste_duplicates.push(url);
                 } else {
-                    res.links.push(link);
+                    res.links.push(Found { link, url });
                 }
             }
             None => res.unrecognized.push(m.as_str().to_string()),
@@ -127,11 +135,13 @@ mod tests {
                     https://www.youtube.com/watch?v=aaaaaaaaaaa&t=3 \
                     (https://www.youtube.com/shorts/ccccccccccc) https://example.com/x";
         let r = parse_links(text);
+        let links: Vec<Link> = r.links.iter().map(|f| f.link.clone()).collect();
+        assert_eq!(links, vec![v("aaaaaaaaaaa"), v("bbbbbbbbbbb"), v("ccccccccccc")]);
+        assert_eq!(r.links[0].url, "https://youtu.be/aaaaaaaaaaa");
         assert_eq!(
-            r.links,
-            vec![v("aaaaaaaaaaa"), v("bbbbbbbbbbb"), v("ccccccccccc")]
+            r.paste_duplicates,
+            vec!["https://www.youtube.com/watch?v=aaaaaaaaaaa&t=3".to_string()]
         );
-        assert_eq!(r.paste_duplicates, 1);
         assert!(r.unrecognized.is_empty());
     }
 
@@ -142,6 +152,6 @@ mod tests {
         let r = parse_links("https://notyoutube.com/watch?v=dQw4w9WgXcQ");
         assert!(r.links.is_empty());
         let r = parse_links("https://www.youtube.com/@channel");
-        assert_eq!(r.unrecognized.len(), 1);
+        assert_eq!(r.unrecognized, vec!["https://www.youtube.com/@channel".to_string()]);
     }
 }

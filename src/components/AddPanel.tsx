@@ -3,7 +3,9 @@ import { api } from '../api';
 import { useStore } from '../store';
 import type { AddResult } from '../types';
 
-function summarize(r: AddResult): { text: string; tone: 'ok' | 'warn' | 'error' } {
+type Tone = 'ok' | 'warn' | 'error';
+
+function summarize(r: AddResult): { text: string; tone: Tone } {
   const parts: string[] = [];
 
   if (r.added.length) {
@@ -11,29 +13,42 @@ function summarize(r: AddResult): { text: string; tone: 'ok' | 'warn' | 'error' 
   }
 
   if (r.duplicates.length) {
-    const queued = r.duplicates.filter((d) => d.status !== 'done').length;
-    const done = r.duplicates.length - queued;
-    const where = [queued && `대기열 ${queued}`, done && `완료 ${done}`].filter(Boolean).join(', ');
-    parts.push(`${r.duplicates.length}개는 이미 있어서 건너뜀 (${where})`);
+    parts.push(`이미 있는 영상 ${r.duplicates.length}개 건너뜀`);
   }
 
-  if (r.pasteDuplicates) {
-    parts.push(`붙여넣기 안 중복 ${r.pasteDuplicates}개`);
+  if (r.pasteDuplicates.length) {
+    parts.push(`붙여넣기 안 중복 ${r.pasteDuplicates.length}개`);
   }
 
   if (r.unrecognized.length) {
     parts.push(`인식하지 못한 링크 ${r.unrecognized.length}개`);
   }
 
-  parts.push(...r.playlistErrors);
+  if (r.playlistErrors.length) {
+    parts.push(`재생목록 오류 ${r.playlistErrors.length}개`);
+  }
+
   if (!parts.length) return { text: 'YouTube 링크를 찾지 못했습니다.', tone: 'error' };
   return { text: parts.join(' · '), tone: r.added.length ? 'ok' : 'warn' };
+}
+
+/** 항목이 많으면 접어서 보여준다 */
+function DetailList({ title, children, count }: { title: string; count: number; children: React.ReactNode }) {
+  if (!count) return null;
+  return (
+    <details className='detail' open={count <= 5}>
+      <summary>
+        {title} ({count})
+      </summary>
+      <ul>{children}</ul>
+    </details>
+  );
 }
 
 export function AddPanel() {
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState<{ text: string; tone: string } | null>(null);
+  const [notice, setNotice] = useState<{ text: string; tone: Tone; result?: AddResult } | null>(null);
   const upsert = useStore((s) => s.upsert);
 
   async function add() {
@@ -42,7 +57,7 @@ export function AddPanel() {
     try {
       const r = await api.addLinks(text);
       upsert(r.added);
-      setNotice(summarize(r));
+      setNotice({ ...summarize(r), result: r });
       if (r.added.length || r.duplicates.length) setText('');
     } catch (e) {
       setNotice({ text: String(e), tone: 'error' });
@@ -50,6 +65,8 @@ export function AddPanel() {
       setBusy(false);
     }
   }
+
+  const r = notice?.result;
 
   return (
     <section className='add-panel'>
@@ -74,7 +91,43 @@ export function AddPanel() {
       </div>
       {notice && (
         <div className={`notice ${notice.tone}`}>
-          <span>{notice.text}</span>
+          <div className='notice-body'>
+            <div>{notice.text}</div>
+            {r && (
+              <>
+                <DetailList title='이미 있는 영상' count={r.duplicates.length}>
+                  {r.duplicates.map((d) => (
+                    <li key={d.videoId}>
+                      <span className='badge'>{d.status === 'done' ? '완료 목록' : '대기열'}</span>
+                      {d.title && <span className='detail-title'>{d.title}</span>}
+                      <span className='url'>{d.url}</span>
+                    </li>
+                  ))}
+                </DetailList>
+                <DetailList title='붙여넣기 안에서 겹친 주소' count={r.pasteDuplicates.length}>
+                  {r.pasteDuplicates.map((u, i) => (
+                    <li key={i}>
+                      <span className='url'>{u}</span>
+                    </li>
+                  ))}
+                </DetailList>
+                <DetailList title='인식하지 못한 링크' count={r.unrecognized.length}>
+                  {r.unrecognized.map((u, i) => (
+                    <li key={i}>
+                      <span className='url'>{u}</span>
+                    </li>
+                  ))}
+                </DetailList>
+                <DetailList title='재생목록 오류' count={r.playlistErrors.length}>
+                  {r.playlistErrors.map((m, i) => (
+                    <li key={i}>
+                      <span className='url'>{m}</span>
+                    </li>
+                  ))}
+                </DetailList>
+              </>
+            )}
+          </div>
           <button className='ghost' onClick={() => setNotice(null)} aria-label='닫기'>
             ✕
           </button>

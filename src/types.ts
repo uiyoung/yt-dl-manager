@@ -17,6 +17,10 @@ export interface Video {
   errorMsg: string | null;
   createdAt: number;
   completedAt: number | null;
+  /** 정보 조회 때 받은 예상 크기 (최고화질 기준) */
+  sizeEstimate: number | null;
+  /** 이 영상만의 저장 폴더 (없으면 설정의 저장 폴더) */
+  outputDir: string | null;
 }
 
 export interface Progress {
@@ -39,8 +43,10 @@ export interface Settings {
 
 export interface AddResult {
   added: Video[];
-  duplicates: { videoId: string; title: string | null; status: Status }[];
-  pasteDuplicates: number;
+  /** 대기열이나 완료 목록에 이미 있는 영상 (url은 붙여넣은 주소) */
+  duplicates: { videoId: string; url: string; title: string | null; status: Status }[];
+  /** 같은 붙여넣기 안에서 앞의 링크와 겹친 주소 */
+  pasteDuplicates: string[];
   unrecognized: string[];
   playlistErrors: string[];
 }

@@ -168,7 +168,7 @@ fn build_args(v: &Video, s: &Settings) -> Vec<String> {
     }
     a.extend([
         "-P".into(),
-        s.output_dir.clone(),
+        v.output_dir.clone().unwrap_or_else(|| s.output_dir.clone()),
         "-o".into(),
         s.filename_template.clone(),
         "--".into(),
@@ -199,7 +199,8 @@ async fn download(
     s: &Settings,
     mut stop_rx: oneshot::Receiver<()>,
 ) -> Outcome {
-    if let Err(e) = std::fs::create_dir_all(&s.output_dir) {
+    let out_dir = v.output_dir.as_deref().unwrap_or(&s.output_dir);
+    if let Err(e) = std::fs::create_dir_all(out_dir) {
         return Outcome::Failed(format!("저장 폴더를 만들 수 없습니다: {e}"));
     }
     let mut child = match tools::ytdlp().args(build_args(v, s)).spawn() {
@@ -309,7 +310,7 @@ pub async fn fetch_meta(app: AppHandle, st: Arc<AppState>, id: i64, url: String)
             "--encoding",
             "utf-8",
             "-O",
-            "%(.{title,channel,uploader,duration,thumbnail})j",
+            "%(.{title,channel,uploader,duration,thumbnail,filesize,filesize_approx})j",
             "--",
             &url,
         ])
@@ -334,9 +335,13 @@ pub async fn fetch_meta(app: AppHandle, st: Arc<AppState>, id: i64, url: String)
                 j["channel"].as_str().or(j["uploader"].as_str()),
                 j["duration"].as_f64(),
                 j["thumbnail"].as_str(),
+                j["filesize"]
+                    .as_f64()
+                    .or(j["filesize_approx"].as_f64())
+                    .map(|n| n as i64),
                 true,
             ),
-            None => db::set_meta(&conn, id, None, None, None, None, false),
+            None => db::set_meta(&conn, id, None, None, None, None, None, false),
         };
     }
     emit_video(&app, &st, id);

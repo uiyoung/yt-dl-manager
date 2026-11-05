@@ -33,10 +33,14 @@ pub struct Video {
     pub error_msg: Option<String>,
     pub created_at: i64,
     pub completed_at: Option<i64>,
+    /// 정보 조회 때 받은 예상 크기(바이트, 최고화질 기준)
+    pub size_estimate: Option<i64>,
+    /// 이 영상만의 저장 폴더. 없으면 설정의 저장 폴더를 쓴다.
+    pub output_dir: Option<String>,
 }
 
 const COLS: &str = "id, video_id, url, title, channel, duration, thumbnail, meta_state, status, quality, \
-                    file_path, file_size, error_msg, created_at, completed_at";
+                    file_path, file_size, error_msg, created_at, completed_at, size_estimate, output_dir";
 
 fn row_to_video(r: &Row) -> rusqlite::Result<Video> {
     Ok(Video {
@@ -55,6 +59,8 @@ fn row_to_video(r: &Row) -> rusqlite::Result<Video> {
         error_msg: r.get(12)?,
         created_at: r.get(13)?,
         completed_at: r.get(14)?,
+        size_estimate: r.get(15)?,
+        output_dir: r.get(16)?,
     })
 }
 
@@ -77,12 +83,33 @@ pub fn init(conn: &Connection) -> rusqlite::Result<()> {
             quality TEXT NOT NULL DEFAULT 'best',
             file_path TEXT, file_size INTEGER, error_msg TEXT,
             created_at INTEGER NOT NULL,
-            completed_at INTEGER
+            completed_at INTEGER,
+            size_estimate INTEGER,
+            output_dir TEXT
          );
-         CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-         -- 앱을 다시 켜면 받던/기다리던 항목은 '준비' 상태로 (자동으로 다시 받지 않음)
-         UPDATE videos SET status='ready' WHERE status IN ('queued','downloading','canceled');",
+         CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
+    )?;
+    // 이전 버전으로 만든 DB에 새 열 추가
+    for (col, ty) in [("size_estimate", "INTEGER"), ("output_dir", "TEXT")] {
+        if !has_column(conn, "videos", col)? {
+            conn.execute_batch(&format!("ALTER TABLE videos ADD COLUMN {col} {ty}"))?;
+        }
+    }
+    // 앱을 다시 켜면 받던/기다리던 항목은 '준비' 상태로 (자동으로 다시 받지 않음)
+    conn.execute_batch(
+        "UPDATE videos SET status='ready' WHERE status IN ('queued','downloading','canceled');",
     )
+}
+
+fn has_column(conn: &Connection, table: &str, col: &str) -> rusqlite::Result<bool> {
+    let mut st = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let names = st.query_map([], |r| r.get::<_, String>(1))?;
+    for n in names {
+        if n? == col {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 pub fn list_all(conn: &Connection) -> rusqlite::Result<Vec<Video>> {
@@ -144,13 +171,15 @@ pub fn set_meta(
     channel: Option<&str>,
     duration: Option<f64>,
     thumbnail: Option<&str>,
+    size_estimate: Option<i64>,
     ok: bool,
 ) -> rusqlite::Result<()> {
     conn.execute(
         "UPDATE videos SET title=COALESCE(?2,title), channel=COALESCE(?3,channel),
-            duration=COALESCE(?4,duration), thumbnail=COALESCE(?5,thumbnail), meta_state=?6
+            duration=COALESCE(?4,duration), thumbnail=COALESCE(?5,thumbnail),
+            size_estimate=COALESCE(?6,size_estimate), meta_state=?7
          WHERE id=?1",
-        params![id, title, channel, duration, thumbnail, if ok { "ok" } else { "failed" }],
+        params![id, title, channel, duration, thumbnail, size_estimate, if ok { "ok" } else { "failed" }],
     )?;
     Ok(())
 }
@@ -221,6 +250,24 @@ pub fn set_quality(conn: &Connection, id: i64, quality: &str) -> rusqlite::Resul
     conn.execute(
         "UPDATE videos SET quality=?2 WHERE id=?1 AND status!='downloading'",
         params![id, quality],
+    )?;
+    Ok(())
+}
+
+/// 아직 받지 않은 영상의 저장 폴더 지정 (None이면 설정의 저장 폴더)
+pub fn set_output_dir(conn: &Connection, id: i64, dir: Option<&str>) -> rusqlite::Result<bool> {
+    let n = conn.execute(
+        "UPDATE videos SET output_dir=?2 WHERE id=?1 AND status IN ('ready','error')",
+        params![id, dir],
+    )?;
+    Ok(n > 0)
+}
+
+/// 완료한 파일을 옮긴 뒤 경로 갱신
+pub fn set_file_path(conn: &Connection, id: i64, path: &str) -> rusqlite::Result<()> {
+    conn.execute(
+        "UPDATE videos SET file_path=?2 WHERE id=?1",
+        params![id, path],
     )?;
     Ok(())
 }
@@ -335,6 +382,11 @@ mod tests {
         init(&c).unwrap();
         let v = insert(&c, "ddddddddddd", "u", "best").unwrap().unwrap();
         assert_eq!(v.status, "ready");
+        assert!(has_column(&c, "videos", "output_dir").unwrap(), "새 열이 추가됨");
+        set_meta(&c, v.id, Some("t"), None, None, None, Some(1234), true).unwrap();
+        assert!(set_output_dir(&c, v.id, Some("/tmp/x")).unwrap());
+        let v = get(&c, v.id).unwrap().unwrap();
+        assert_eq!((v.size_estimate, v.output_dir.as_deref()), (Some(1234), Some("/tmp/x")));
         assert!(claim_next(&c).unwrap().is_none(), "추가만 하면 다운로드가 시작되지 않음");
     }
 

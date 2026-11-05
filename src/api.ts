@@ -9,6 +9,10 @@ export const api = {
   /** 받는 중이거나 순서를 기다리는 항목을 멈추고 '준비'로 되돌림 */
   stop: (ids: number[]) => invoke<void>("stop_videos", { ids }),
   setQuality: (id: number, quality: string) => invoke<void>("set_quality", { id, quality }),
+  /** 아직 받지 않은 영상의 저장 폴더 (null이면 기본 폴더로) */
+  setOutputDir: (id: number, dir: string | null) => invoke<void>("set_output_dir", { id, dir }),
+  /** 완료한 파일을 다른 폴더로 옮김 */
+  moveDoneFile: (id: number, dir: string) => invoke<Video>("move_done_file", { id, dir }),
   remove: (ids: number[]) => invoke<void>("remove_videos", { ids }),
   getSettings: () => invoke<Settings>("get_settings"),
   saveSettings: (settings: Settings) => invoke<Settings>("save_settings", { settings }),
