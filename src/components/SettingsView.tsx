@@ -233,6 +233,17 @@ export function SettingsView() {
           Found on your system PATH. Install or upgrade them with your package manager (Chocolatey, winget, Homebrew…).
         </small>
       </section>
+
+      <section className={cx(section, divided)}>
+        <h2 className={sectionTitle}>Log</h2>
+
+        <div className='flex items-center gap-2'>
+          <Button onClick={() => api.openLogFolder().catch((e) => setMsg(String(e)))}>Open log folder</Button>
+        </div>
+        <small className={hint}>
+          Downloads, video info lookups and cuts are recorded here, including full error output.
+        </small>
+      </section>
     </div>
   );
 }

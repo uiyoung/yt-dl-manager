@@ -1,5 +1,5 @@
 import { SORT_LABELS, type Sort, type SortKey } from "../sort";
-import { SortDirIcon } from "./icons";
+import { SortDirIcon } from "../icons";
 import { Button, lineControl } from "../ui";
 
 export function SortControl({ sort, onChange, dateLabel }: { sort: Sort; onChange: (s: Sort) => void; dateLabel: string }) {

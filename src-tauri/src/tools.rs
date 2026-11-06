@@ -74,6 +74,28 @@ pub fn command(name: &str) -> Command {
     c
 }
 
+/// 로그에 남길 명령 줄: 실제로 실행하는 파일 경로와, 터미널에 그대로 붙여넣을 수 있게 따옴표를 붙인 인자.
+/// macOS/Linux는 sh 방식('…'), Windows는 PowerShell·cmd 방식("…").
+pub fn command_line(name: &str, args: &[String]) -> String {
+    std::iter::once(find(name).to_string_lossy().into_owned())
+        .chain(args.iter().cloned())
+        .map(|a| shell_quote(&a))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn shell_quote(a: &str) -> String {
+    let plain = !a.is_empty()
+        && a.chars().all(|c| c.is_ascii_alphanumeric() || "_@+=:,./-".contains(c));
+    if plain {
+        a.to_string()
+    } else if cfg!(windows) {
+        format!("\"{}\"", a.replace('"', "\\\""))
+    } else {
+        format!("'{}'", a.replace('\'', "'\\''"))
+    }
+}
+
 pub fn ytdlp() -> Command {
     command("yt-dlp")
 }
@@ -94,5 +116,20 @@ mod tests {
             dirs,
             vec![p(r"C:\ProgramData\chocolatey\bin"), p("/usr/bin"), p("/opt/homebrew/bin")]
         );
+    }
+}
+
+#[cfg(all(test, not(windows)))]
+mod quote_tests {
+    use super::shell_quote;
+
+    #[test]
+    fn quotes_only_when_needed() {
+        assert_eq!(shell_quote("--no-playlist"), "--no-playlist");
+        assert_eq!(shell_quote("https://youtu.be/abc?t=1"), "'https://youtu.be/abc?t=1'");
+        assert_eq!(shell_quote("/Users/me/YT Downloads"), "'/Users/me/YT Downloads'");
+        assert_eq!(shell_quote("%(title)s [%(id)s].%(ext)s"), "'%(title)s [%(id)s].%(ext)s'");
+        assert_eq!(shell_quote("it's"), "'it'\\''s'");
+        assert_eq!(shell_quote(""), "''");
     }
 }

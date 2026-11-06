@@ -6,7 +6,9 @@ import { QueueView } from './components/QueueView';
 import { DoneView } from './components/DoneView';
 import { SettingsView } from './components/SettingsView';
 import { Toast } from './toast';
+import { CutDialogHost } from './components/CutDialog';
 import { buttonBase, cx } from './ui';
+import { DoneIcon, QueueIcon, SettingsIcon } from './icons';
 
 type Tab = 'queue' | 'done' | 'settings';
 
@@ -74,15 +76,31 @@ export default function App() {
       <AddPanel />
       <nav className='flex gap-1 border-b border-line'>
         <button className={tabClass(tab === 'queue')} onClick={() => setTab('queue')}>
+          <QueueIcon />
           queue
-          <span className='ml-1 rounded-[10px] bg-hover px-[7px] py-px text-[12px]'>{queueCount}</span>
+          {/* 대기열에 항목이 있으면 파란색으로, 비었으면 흐리게 */}
+          <span
+            className={cx(
+              'rounded-[10px] px-[7px] py-px text-[12px] tabular-nums',
+              queueCount ? 'bg-info-bg font-semibold text-info' : 'bg-hover text-dim',
+            )}
+          >
+            {queueCount}
+          </span>
         </button>
         <button className={tabClass(tab === 'done')} onClick={() => setTab('done')}>
+          <DoneIcon />
           done
           {/* <span className='count'>{doneCount}</span> */}
         </button>
-        <button className={tabClass(tab === 'settings')} onClick={() => setTab('settings')}>
-          settings
+        {/* 설정은 오른쪽 끝에 톱니바퀴 아이콘만 */}
+        <button
+          className={cx(tabClass(tab === 'settings'), 'ml-auto px-2.5')}
+          onClick={() => setTab('settings')}
+          title='Settings'
+          aria-label='Settings'
+        >
+          <SettingsIcon />
         </button>
       </nav>
       {error && <div className='rounded-md bg-error-bg px-2.5 py-2 text-error'>{error}</div>}
@@ -90,6 +108,7 @@ export default function App() {
       {tab === 'done' && <DoneView />}
       {tab === 'settings' && <SettingsView />}
       <Toast />
+      <CutDialogHost />
       <StatusBar tab={tab} />
     </main>
   );

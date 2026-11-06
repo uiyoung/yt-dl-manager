@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { MoreIcon } from './icons';
+import { MoreIcon } from '../icons';
 import { Button, buttonBase, cx } from '../ui';
 
 export type MenuItem =

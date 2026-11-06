@@ -9,6 +9,8 @@ export function cx(...parts: (string | false | null | undefined)[]) {
 /** 입력칸·선택칸·여러 줄 입력의 기본 모양 */
 // 사용할 수 없을 때는 브라우저 기본처럼 흐리게
 export const control = 'rounded-md border border-line bg-panel px-2 py-1.5 disabled:opacity-70';
+/** 한 줄짜리 입력칸·선택칸. 브라우저마다 select와 input 기본 높이가 달라서 높이를 32px로 고정한다 */
+export const lineControl = `${control} h-8`;
 
 /** 모든 버튼이 공유하는 바탕: 아이콘과 글자를 가운데 맞춰 나란히 */
 export const buttonBase =

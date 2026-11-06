@@ -23,4 +23,15 @@ export const api = {
   getSettings: () => invoke<Settings>("get_settings"),
   saveSettings: (settings: Settings) => invoke<Settings>("save_settings", { settings }),
   checkTools: () => invoke<ToolStatus>("check_tools"),
+  /** 대기열 항목에서 구간 항목을 만들어 대기열에 넣는다 (받을 때 그 구간만 받음) */
+  addClip: (id: number, start: number, end: number, precise: boolean) =>
+    invoke<Video>("add_clip", { id, start, end, precise }),
+  /** 완료한 파일을 미리보기로 열 수 있게 하고 경로를 돌려준다 */
+  allowPreview: (id: number) => invoke<string>("allow_preview", { id }),
+  /** 완료한 파일에서 구간을 잘라 새 파일로 저장한다 (진행률은 cut-progress 이벤트) */
+  cutDoneVideo: (id: number, start: number, end: number, precise: boolean) =>
+    invoke<Video>("cut_done_video", { id, start, end, precise }),
+  cancelCut: (id: number) => invoke<void>("cancel_cut", { id }),
+  /** 로그 폴더를 Finder/탐색기로 연다 */
+  openLogFolder: () => invoke<void>("open_log_folder"),
 };

@@ -25,6 +25,11 @@ export interface Video {
   heights: number[] | null;
   /** 실제로 받은 화질 ("1080" 등 또는 "audio"). 모르면 null */
   gotQuality: string | null;
+  /** 구간 항목이면 원본 영상 기준 시작·끝(초). 영상 전체면 null */
+  clipStart: number | null;
+  clipEnd: number | null;
+  /** 프레임 단위로 정확히 자르는지 (다시 인코딩) */
+  clipPrecise: boolean;
 }
 
 export interface Progress {

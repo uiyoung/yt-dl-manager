@@ -1,4 +1,6 @@
 import { confirm, message } from "@tauri-apps/plugin-dialog";
+import { api } from "./api";
+import { useStore } from "./store";
 import type { Video } from "./types";
 
 /** 목록에서 제거하기 전에 확인을 받는다. 받은 파일은 지우지 않는다는 점도 알린다. */
@@ -12,6 +14,14 @@ export async function confirmRemove(videos: Video[]): Promise<boolean> {
   if (videos.some((v) => v.status === "downloading" || v.status === "queued"))
     lines.push("Videos that are downloading or queued will be stopped.");
   return confirm(lines.join("\n"), { title: "Remove from list", kind: "warning", okLabel: "Remove", cancelLabel: "Cancel" });
+}
+
+/** 대기열 항목을 확인을 받고 목록에서 제거한다 */
+export async function removeVideos(ids: number[]) {
+  const all = useStore.getState().videos;
+  if (!(await confirmRemove(ids.map((id) => all[id]).filter(Boolean)))) return;
+  await api.remove(ids);
+  useStore.getState().remove(ids);
 }
 
 /**

@@ -21,6 +21,8 @@ pub struct AppState {
     pub meta_sem: Semaphore,
     /// YouTube가 요청을 제한하면 이 시각까지 정보 조회를 쉰다
     pub meta_blocked_until: Mutex<Option<Instant>>,
+    /// 진행 중인 구간 자르기(완료 목록): 원본 id → 취소 신호
+    pub cuts: Mutex<HashMap<i64, oneshot::Sender<()>>>,
 }
 
 impl AppState {
@@ -31,6 +33,7 @@ impl AppState {
             jobs: Mutex::new(HashMap::new()),
             meta_sem: Semaphore::new(META_CONCURRENCY),
             meta_blocked_until: Mutex::new(None),
+            cuts: Mutex::new(HashMap::new()),
         }
     }
 
@@ -112,8 +115,22 @@ async fn run_job(
     s: Settings,
     stop_rx: oneshot::Receiver<()>,
 ) {
+    let started = Instant::now();
+    log::info!(
+        "download start #{} {}{} quality={}",
+        v.id,
+        v.url,
+        v.clip().map(|(a, b)| format!(" clip={}", crate::clip::label(a, b))).unwrap_or_default(),
+        v.quality
+    );
     let outcome = download(&app, &v, &s, stop_rx).await;
     st.jobs.lock().unwrap().remove(&v.id);
+    let secs = started.elapsed().as_secs_f64();
+    match &outcome {
+        Outcome::Done(p) => log::info!("download done #{} in {secs:.1}s → {}", v.id, p.as_deref().unwrap_or("?")),
+        Outcome::Stopped => log::info!("download stopped #{} after {secs:.1}s", v.id),
+        Outcome::Failed(msg) => log::warn!("download failed #{} after {secs:.1}s: {msg}", v.id),
+    }
     let got = match &outcome {
         Outcome::Done(Some(p)) => probe_quality(p).await,
         _ => None,
@@ -177,16 +194,25 @@ fn build_args(v: &Video, s: &Settings) -> Vec<String> {
     .map(|s| s.to_string())
     .collect();
     a.extend(format_args(&v.quality));
-    if s.save_thumbnail {
+    // 구간 항목은 썸네일을 따로 받지 않는다 (원본의 썸네일을 함께 쓴다)
+    if s.save_thumbnail && v.clip().is_none() {
         // 변환 없이 원본 그대로 저장한다. yt-dlp는 해상도 높은 썸네일부터 차례로 시도해
         // 처음 있는 것을 받는다 (같은 크기면 webp가 앞이고, 큰 webp가 없으면 그 크기의 jpg).
         a.push("--write-thumbnail".into());
     }
+    // 구간 항목: 그 구간만 받고, 파일 이름에 구간을 붙인다
+    let template = match v.clip() {
+        Some((start, end)) => {
+            a.extend(crate::clip::ytdlp_args(start, end, v.clip_precise));
+            crate::clip::template_with_label(&s.filename_template, &crate::clip::label(start, end))
+        }
+        None => s.filename_template.clone(),
+    };
     a.extend([
         "-P".into(),
         v.output_dir.clone().unwrap_or_else(|| s.output_dir.clone()),
         "-o".into(),
-        s.filename_template.clone(),
+        template,
         "--".into(),
         v.url.clone(),
     ]);
@@ -219,7 +245,9 @@ async fn download(
     if let Err(e) = std::fs::create_dir_all(out_dir) {
         return Outcome::Failed(format!("Can't create the save folder: {e}"));
     }
-    let mut child = match tools::ytdlp().args(build_args(v, s)).spawn() {
+    let args = build_args(v, s);
+    log::info!("{}", tools::command_line("yt-dlp", &args));
+    let mut child = match tools::ytdlp().args(args).spawn() {
         Ok(c) => c,
         Err(e) => return Outcome::Failed(format!("Can't run yt-dlp: {e}")),
     };
@@ -293,7 +321,11 @@ async fn download(
             let errs = err_task.await.unwrap_or_default();
             match status {
                 Ok(st) if st.success() => Outcome::Done(file),
-                Ok(st) => Outcome::Failed(pick_error(&errs, st.code())),
+                Ok(st) => {
+                    // 화면에는 한 줄만 보여주고, 로그에는 yt-dlp 출력 끝부분을 그대로 남긴다
+                    log::warn!("yt-dlp #{id} exited with {:?}:\n{}", st.code(), errs.iter().cloned().collect::<Vec<_>>().join("\n"));
+                    Outcome::Failed(pick_error(&errs, st.code()))
+                }
                 Err(e) => Outcome::Failed(format!("yt-dlp error: {e}")),
             }
         }
@@ -364,6 +396,7 @@ pub async fn fetch_meta(app: AppHandle, st: Arc<AppState>, id: i64, url: String)
         }
         match fetch_meta_once(&url).await {
             Err(MetaError::RateLimited) => {
+                log::warn!("info #{id} rate-limited by YouTube; pausing lookups for {} min", META_BLOCK.as_secs() / 60);
                 let mut until = st.meta_blocked_until.lock().unwrap();
                 // 이미 다른 조회가 막힘을 알렸으면 다시 알리지 않는다
                 if until.map_or(true, |u| u <= Instant::now()) {
@@ -372,8 +405,12 @@ pub async fn fetch_meta(app: AppHandle, st: Arc<AppState>, id: i64, url: String)
                 }
             }
             r => {
+                if let Err(MetaError::Failed(why)) = &r {
+                    log::warn!("info #{id} failed for {url}: {why}");
+                }
                 // 쉬었다가 처음 성공하면 화면의 '쉬는 중' 표시를 지운다
                 if r.is_ok() && st.meta_blocked_until.lock().unwrap().take().is_some() {
+                    log::info!("info lookups resumed");
                     emit_meta_pause(&app, None);
                 }
                 save_meta(&st, id, r.ok());
@@ -387,7 +424,8 @@ pub async fn fetch_meta(app: AppHandle, st: Arc<AppState>, id: i64, url: String)
 
 enum MetaError {
     RateLimited,
-    Failed,
+    /// 실패 이유 (로그용)
+    Failed(String),
 }
 
 /// (영상 정보, 화질 목록)
@@ -411,12 +449,13 @@ async fn fetch_meta_once(url: &str) -> Result<Meta, MetaError> {
         ])
         .output()
         .await
-        .map_err(|_| MetaError::Failed)?;
+        .map_err(|e| MetaError::Failed(format!("can't run yt-dlp: {e}")))?;
     if !out.status.success() {
-        return Err(if is_rate_limited(&String::from_utf8_lossy(&out.stderr)) {
+        let err = String::from_utf8_lossy(&out.stderr);
+        return Err(if is_rate_limited(&err) {
             MetaError::RateLimited
         } else {
-            MetaError::Failed
+            MetaError::Failed(err.trim().lines().last().unwrap_or("unknown error").to_string())
         });
     }
     // 첫 줄은 영상 정보(객체), 둘째 줄은 형식 목록(배열)
@@ -429,7 +468,7 @@ async fn fetch_meta_once(url: &str) -> Result<Meta, MetaError> {
             _ => {}
         }
     }
-    parsed.map(|j| (j, heights)).ok_or(MetaError::Failed)
+    parsed.map(|j| (j, heights)).ok_or_else(|| MetaError::Failed("no video info in the output".into()))
 }
 
 /// 조회 결과를 저장한다. None이면 '정보 없음'으로 표시
@@ -477,8 +516,14 @@ pub async fn probe_quality(path: &str) -> Option<String> {
         ])
         .output()
         .await
+        .map_err(|e| log::warn!("ffprobe can't run: {e}"))
         .ok()
-        .filter(|o| o.status.success())?;
+        .filter(|o| {
+            if !o.status.success() {
+                log::warn!("ffprobe failed for {path}: {}", String::from_utf8_lossy(&o.stderr).trim());
+            }
+            o.status.success()
+        })?;
     quality_from_probe(&String::from_utf8_lossy(&out.stdout))
 }
 
@@ -544,6 +589,7 @@ pub async fn expand_playlist(list_id: &str) -> Result<Vec<String>, String> {
         .map_err(|e| format!("Can't run yt-dlp: {e}"))?;
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
+        log::warn!("playlist {list_id} failed:\n{}", err.trim());
         return Err(err.lines().last().unwrap_or("Couldn't read the playlist").to_string());
     }
     Ok(String::from_utf8_lossy(&out.stdout)
@@ -557,6 +603,23 @@ pub async fn expand_playlist(list_id: &str) -> Result<Vec<String>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clip_items_download_only_their_section() {
+        let s = Settings::default();
+        let full = Video { url: "u".into(), quality: "best".into(), ..Default::default() };
+        let a = build_args(&full, &s);
+        assert!(!a.contains(&"--download-sections".to_string()));
+
+        let clip = Video { clip_start: Some(90.0), clip_end: Some(165.0), clip_precise: true, ..full };
+        let a = build_args(&clip, &s);
+        let i = a.iter().position(|x| x == "--download-sections").unwrap();
+        assert_eq!(a[i + 1], "*90-165");
+        assert!(a.contains(&"--force-keyframes-at-cuts".to_string()));
+        let o = a.iter().position(|x| x == "-o").unwrap();
+        assert_eq!(a[o + 1], "%(title)s [%(id)s] (1m30s-2m45s).%(ext)s");
+        assert!(!a.contains(&"--write-thumbnail".to_string()), "구간 항목은 썸네일을 받지 않음");
+    }
 
     #[test]
     fn detects_rate_limit_errors() {

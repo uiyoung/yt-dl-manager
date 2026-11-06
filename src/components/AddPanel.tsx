@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { api } from '../api';
 import { useStore } from '../store';
-import { CloseIcon } from './icons';
+import { CloseIcon } from '../icons';
 import { Badge, Button, control, cx } from '../ui';
 import type { AddResult } from '../types';
 import { askPlaylist } from '../askPlaylist';

@@ -1,3 +1,4 @@
+mod clip;
 mod commands;
 mod db;
 mod queue;
@@ -7,14 +8,35 @@ mod url_parser;
 use std::sync::Arc;
 use tauri::Manager;
 
+/// 로그 파일: macOS ~/Library/Logs/<앱 id>/app.log, Windows %LOCALAPPDATA%\<앱 id>\logs\app.log.
+/// 이 앱의 기록만 남기고(라이브러리는 경고 이상), 2MB가 넘으면 새 파일로 넘겨 최근 5개만 둔다.
+fn log_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
+    use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
+    let mut targets = vec![Target::new(TargetKind::LogDir { file_name: Some("app".into()) })];
+    if cfg!(debug_assertions) {
+        targets.push(Target::new(TargetKind::Stdout));
+    }
+    tauri_plugin_log::Builder::new()
+        .clear_targets()
+        .targets(targets)
+        .level(log::LevelFilter::Warn)
+        .level_for("yt_dl_manager_lib", log::LevelFilter::Info)
+        .max_file_size(2_000_000)
+        .rotation_strategy(RotationStrategy::KeepSome(5))
+        .timezone_strategy(TimezoneStrategy::UseLocal)
+        .build()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(log_plugin())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
+
             let conn = db::open(&data_dir.join("library.db"))?;
             let state = Arc::new(queue::AppState::new(conn));
             app.manage(state.clone());
@@ -48,6 +70,11 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::list_videos,
             commands::add_links,
+            commands::add_clip,
+            commands::allow_preview,
+            commands::cut_done_video,
+            commands::cancel_cut,
+            commands::open_log_folder,
             commands::playlist_video_links,
             commands::download_videos,
             commands::stop_videos,

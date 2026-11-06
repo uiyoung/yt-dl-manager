@@ -41,10 +41,22 @@ pub struct Video {
     pub heights: Option<Vec<u32>>,
     /// 실제로 받은 화질 (받은 파일에서 읽음): "1080" 같은 표시 화질 또는 "audio". 모르면 None.
     pub got_quality: Option<String>,
+    /// 구간 항목이면 원본 영상 기준 시작·끝(초). 영상 전체면 None.
+    pub clip_start: Option<f64>,
+    pub clip_end: Option<f64>,
+    /// 구간을 프레임 단위로 정확히 자를지 (다시 인코딩하므로 느림)
+    pub clip_precise: bool,
+}
+
+impl Video {
+    pub fn clip(&self) -> Option<(f64, f64)> {
+        self.clip_start.zip(self.clip_end)
+    }
 }
 
 const COLS: &str = "id, video_id, url, title, channel, duration, thumbnail, meta_state, status, quality, \
-                    file_path, file_size, error_msg, created_at, completed_at, size_estimate, output_dir, heights, got_quality";
+                    file_path, file_size, error_msg, created_at, completed_at, size_estimate, output_dir, heights, got_quality, \
+                    clip_start, clip_end, clip_precise";
 
 fn row_to_video(r: &Row) -> rusqlite::Result<Video> {
     Ok(Video {
@@ -69,6 +81,9 @@ fn row_to_video(r: &Row) -> rusqlite::Result<Video> {
             .get::<_, Option<String>>(17)?
             .and_then(|s| serde_json::from_str(&s).ok()),
         got_quality: r.get(18)?,
+        clip_start: r.get(19)?,
+        clip_end: r.get(20)?,
+        clip_precise: r.get::<_, Option<bool>>(21)?.unwrap_or(false),
     })
 }
 
@@ -78,37 +93,90 @@ pub fn open(path: &Path) -> rusqlite::Result<Connection> {
     Ok(conn)
 }
 
+/// videos 테이블 정의. 같은 영상도 구간이 다르면 따로 넣을 수 있어서,
+/// 중복 검사는 video_id 하나가 아니라 (영상, 구간) 색인으로 한다.
+const VIDEOS_TABLE: &str = "CREATE TABLE IF NOT EXISTS videos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    video_id TEXT NOT NULL,
+    url TEXT NOT NULL,
+    title TEXT, channel TEXT, duration REAL, thumbnail TEXT,
+    meta_state TEXT NOT NULL DEFAULT 'pending',
+    status TEXT NOT NULL DEFAULT 'ready',
+    quality TEXT NOT NULL DEFAULT 'best',
+    file_path TEXT, file_size INTEGER, error_msg TEXT,
+    created_at INTEGER NOT NULL,
+    completed_at INTEGER,
+    size_estimate INTEGER,
+    output_dir TEXT,
+    heights TEXT,
+    got_quality TEXT,
+    clip_start REAL,
+    clip_end REAL,
+    clip_precise INTEGER
+)";
+
+/// 영상 전체는 구간을 -1로 보고 색인한다 (NULL끼리는 같다고 보지 않아서)
+const VIDEOS_KEY: &str = "CREATE UNIQUE INDEX IF NOT EXISTS videos_key
+    ON videos (video_id, COALESCE(clip_start, -1), COALESCE(clip_end, -1))";
+
 pub fn init(conn: &Connection) -> rusqlite::Result<()> {
-    conn.execute_batch(
-        "PRAGMA journal_mode=WAL;
-         CREATE TABLE IF NOT EXISTS videos (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            video_id TEXT NOT NULL UNIQUE,
-            url TEXT NOT NULL,
-            title TEXT, channel TEXT, duration REAL, thumbnail TEXT,
-            meta_state TEXT NOT NULL DEFAULT 'pending',
-            status TEXT NOT NULL DEFAULT 'ready',
-            quality TEXT NOT NULL DEFAULT 'best',
-            file_path TEXT, file_size INTEGER, error_msg TEXT,
-            created_at INTEGER NOT NULL,
-            completed_at INTEGER,
-            size_estimate INTEGER,
-            output_dir TEXT,
-            heights TEXT,
-            got_quality TEXT
-         );
-         CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
-    )?;
+    conn.execute_batch("PRAGMA journal_mode=WAL;")?;
+    conn.execute_batch(VIDEOS_TABLE)?;
+    conn.execute_batch("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);")?;
     // 이전 버전으로 만든 DB에 새 열 추가
-    for (col, ty) in [("size_estimate", "INTEGER"), ("output_dir", "TEXT"), ("heights", "TEXT"), ("got_quality", "TEXT")] {
+    for (col, ty) in [
+        ("size_estimate", "INTEGER"),
+        ("output_dir", "TEXT"),
+        ("heights", "TEXT"),
+        ("got_quality", "TEXT"),
+        ("clip_start", "REAL"),
+        ("clip_end", "REAL"),
+        ("clip_precise", "INTEGER"),
+    ] {
         if !has_column(conn, "videos", col)? {
             conn.execute_batch(&format!("ALTER TABLE videos ADD COLUMN {col} {ty}"))?;
         }
     }
+    drop_video_id_unique(conn)?;
+    conn.execute_batch(VIDEOS_KEY)?;
     // 앱을 다시 켜면 받던/기다리던 항목은 '준비' 상태로 (자동으로 다시 받지 않음)
     conn.execute_batch(
         "UPDATE videos SET status='ready' WHERE status IN ('queued','downloading','canceled');",
     )
+}
+
+/// 이전 버전은 video_id에 UNIQUE가 걸려 있어 같은 영상의 구간을 넣을 수 없다.
+/// SQLite는 제약만 지울 수 없으므로 테이블을 새로 만들어 옮긴다.
+fn drop_video_id_unique(conn: &Connection) -> rusqlite::Result<()> {
+    let sql: String = conn.query_row(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='videos'",
+        [],
+        |r| r.get(0),
+    )?;
+    if !sql.contains("video_id TEXT NOT NULL UNIQUE") {
+        return Ok(());
+    }
+    // 새 정의로 테이블을 따로 만들고, 양쪽에 다 있는 열만 옮긴다 (예전에 쓰던 열은 버린다)
+    conn.execute_batch(&VIDEOS_TABLE.replace("EXISTS videos (", "EXISTS videos_new ("))?;
+    let new_cols = column_names(conn, "videos_new")?;
+    let cols = column_names(conn, "videos")?
+        .into_iter()
+        .filter(|c| new_cols.contains(c))
+        .collect::<Vec<_>>()
+        .join(", ");
+    conn.execute_batch(&format!(
+        "BEGIN;
+         INSERT INTO videos_new ({cols}) SELECT {cols} FROM videos;
+         DROP TABLE videos;
+         ALTER TABLE videos_new RENAME TO videos;
+         COMMIT;"
+    ))
+}
+
+fn column_names(conn: &Connection, table: &str) -> rusqlite::Result<Vec<String>> {
+    let mut st = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let names = st.query_map([], |r| r.get::<_, String>(1))?;
+    names.collect()
 }
 
 fn has_column(conn: &Connection, table: &str, col: &str) -> rusqlite::Result<bool> {
@@ -137,9 +205,10 @@ pub fn get(conn: &Connection, id: i64) -> rusqlite::Result<Option<Video>> {
     .optional()
 }
 
+/// 영상 전체 항목 (구간 항목은 빼고)
 pub fn find_by_video_id(conn: &Connection, video_id: &str) -> rusqlite::Result<Option<Video>> {
     conn.query_row(
-        &format!("SELECT {COLS} FROM videos WHERE video_id=?1"),
+        &format!("SELECT {COLS} FROM videos WHERE video_id=?1 AND clip_start IS NULL"),
         [video_id],
         row_to_video,
     )
@@ -159,6 +228,64 @@ pub fn insert(
         "INSERT OR IGNORE INTO videos (video_id, url, quality, status, created_at)
          VALUES (?1, ?2, ?3, 'ready', ?4)",
         params![video_id, url, quality, now()],
+    )?;
+    if n == 0 {
+        return Ok(None);
+    }
+    get(conn, conn.last_insert_rowid())
+}
+
+/// 같은 영상·같은 구간의 항목
+pub fn find_clip(conn: &Connection, video_id: &str, start: f64, end: f64) -> rusqlite::Result<Option<Video>> {
+    conn.query_row(
+        &format!("SELECT {COLS} FROM videos WHERE video_id=?1 AND clip_start=?2 AND clip_end=?3"),
+        params![video_id, start, end],
+        row_to_video,
+    )
+    .optional()
+}
+
+/// 원본 항목에서 구간 항목을 만든다. 정보(제목·화질 목록 등)는 원본에서 그대로 가져오고,
+/// 길이는 구간 길이로 둔다. 같은 영상·같은 구간이 이미 있으면 None.
+/// status가 'done'이면 이미 잘라 둔 파일(file_path)을 함께 기록한다.
+pub fn insert_clip(
+    conn: &Connection,
+    src: &Video,
+    start: f64,
+    end: f64,
+    precise: bool,
+    done_file: Option<(&str, Option<i64>)>,
+) -> rusqlite::Result<Option<Video>> {
+    let (status, file_path, file_size, completed_at) = match done_file {
+        Some((p, size)) => ("done", Some(p), size, Some(now())),
+        None => ("ready", None, None, None),
+    };
+    let n = conn.execute(
+        "INSERT OR IGNORE INTO videos (video_id, url, title, channel, duration, thumbnail, meta_state,
+            status, quality, file_path, file_size, created_at, completed_at, output_dir, heights,
+            got_quality, clip_start, clip_end, clip_precise)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
+        params![
+            src.video_id,
+            src.url,
+            src.title,
+            src.channel,
+            end - start,
+            src.thumbnail,
+            src.meta_state,
+            status,
+            src.quality,
+            file_path,
+            file_size,
+            now(),
+            completed_at,
+            src.output_dir,
+            src.heights.as_ref().map(|h| serde_json::to_string(h).unwrap()),
+            if done_file.is_some() { src.got_quality.clone() } else { None },
+            start,
+            end,
+            precise,
+        ],
     )?;
     if n == 0 {
         return Ok(None);
@@ -226,8 +353,10 @@ pub fn set_meta(
 ) -> rusqlite::Result<()> {
     conn.execute(
         "UPDATE videos SET title=COALESCE(?2,title), channel=COALESCE(?3,channel),
-            duration=COALESCE(?4,duration), thumbnail=COALESCE(?5,thumbnail),
-            size_estimate=COALESCE(?6,size_estimate), meta_state=?7
+            duration=CASE WHEN clip_start IS NULL THEN COALESCE(?4,duration) ELSE duration END,
+            thumbnail=COALESCE(?5,thumbnail),
+            size_estimate=CASE WHEN clip_start IS NULL THEN COALESCE(?6,size_estimate) END,
+            meta_state=?7
          WHERE id=?1",
         params![id, title, channel, duration, thumbnail, size_estimate, if ok { "ok" } else { "failed" }],
     )?;
@@ -475,5 +604,55 @@ mod tests {
         let r = get(&c, v.id).unwrap().unwrap();
         assert_eq!((r.status.as_str(), r.error_msg), ("queued", None));
         assert_eq!(claim_next(&c).unwrap().unwrap().id, v.id);
+    }
+
+    #[test]
+    fn clips_of_the_same_video_can_be_added() {
+        let c = mem();
+        let v = insert(&c, "aaaaaaaaaaa", "u", "720").unwrap().unwrap();
+        set_meta(&c, v.id, Some("t"), Some("ch"), Some(600.0), None, Some(999), true).unwrap();
+        let v = get(&c, v.id).unwrap().unwrap();
+
+        let a = insert_clip(&c, &v, 90.0, 165.0, false, None).unwrap().unwrap();
+        assert_eq!((a.status.as_str(), a.duration, a.clip()), ("ready", Some(75.0), Some((90.0, 165.0))));
+        assert_eq!((a.title.as_deref(), a.quality.as_str(), a.size_estimate), (Some("t"), "720", None));
+        assert!(insert_clip(&c, &v, 90.0, 165.0, true, None).unwrap().is_none(), "같은 구간은 중복");
+        assert!(insert_clip(&c, &v, 0.0, 30.0, false, None).unwrap().is_some(), "다른 구간은 추가됨");
+
+        // 영상 전체의 중복 검사는 구간 항목과 섞이지 않는다
+        assert!(insert(&c, "aaaaaaaaaaa", "u", "best").unwrap().is_none());
+        assert_eq!(find_by_video_id(&c, "aaaaaaaaaaa").unwrap().unwrap().id, v.id);
+
+        // 정보를 다시 받아도 구간 길이는 그대로
+        set_meta(&c, a.id, Some("t2"), None, Some(600.0), None, Some(999), true).unwrap();
+        let a = get(&c, a.id).unwrap().unwrap();
+        assert_eq!((a.title.as_deref(), a.duration, a.size_estimate), (Some("t2"), Some(75.0), None));
+
+        let d = insert_clip(&c, &v, 10.0, 20.0, true, Some(("/x (10s-20s).mp4", Some(5)))).unwrap().unwrap();
+        assert_eq!((d.status.as_str(), d.file_path.as_deref(), d.clip_precise), ("done", Some("/x (10s-20s).mp4"), true));
+    }
+
+    #[test]
+    fn old_unique_schema_is_migrated_for_clips() {
+        let c = Connection::open_in_memory().unwrap();
+        c.execute_batch(
+            "CREATE TABLE videos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, video_id TEXT NOT NULL UNIQUE,
+                url TEXT NOT NULL, title TEXT, channel TEXT, duration REAL, thumbnail TEXT,
+                meta_state TEXT NOT NULL DEFAULT 'pending', status TEXT NOT NULL DEFAULT 'ready',
+                quality TEXT NOT NULL DEFAULT 'best', file_path TEXT, file_size INTEGER,
+                error_msg TEXT, retry_count INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL,
+                completed_at INTEGER, got_quality TEXT);
+             INSERT INTO videos (video_id, url, title, status, created_at, got_quality)
+                VALUES ('aaaaaaaaaaa', 'u', 'kept', 'done', 1, '1080');",
+        )
+        .unwrap();
+        init(&c).unwrap();
+        init(&c).unwrap(); // 두 번 실행해도 괜찮아야 한다
+        let v = find_by_video_id(&c, "aaaaaaaaaaa").unwrap().unwrap();
+        assert_eq!((v.title.as_deref(), v.status.as_str(), v.got_quality.as_deref()), (Some("kept"), "done", Some("1080")));
+        assert!(insert_clip(&c, &v, 1.0, 2.0, false, None).unwrap().is_some());
+        assert!(insert(&c, "aaaaaaaaaaa", "u", "best").unwrap().is_none(), "영상 전체 중복은 계속 막힘");
+        assert!(!has_column(&c, "videos", "retry_count").unwrap(), "쓰지 않는 예전 열은 버림");
     }
 }

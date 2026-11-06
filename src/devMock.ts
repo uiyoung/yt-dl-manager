@@ -28,6 +28,9 @@ function mk(videoId: string, title: string, p: Partial<Video> = {}): Video {
     outputDir: null,
     heights: [1080, 720, 480, 360, 240, 144],
     gotQuality: null,
+    clipStart: null,
+    clipEnd: null,
+    clipPrecise: false,
     ...p,
   };
 }
@@ -60,7 +63,7 @@ let settings: Settings = {
 
 export function installDevMock() {
   mockIPC(
-    (cmd, args) => {
+    async (cmd, args) => {
       const a = (args ?? {}) as Record<string, unknown>;
       switch (cmd) {
         case "list_videos":
@@ -151,6 +154,39 @@ export function installDevMock() {
           return;
         case "trash_done_video":
           videos.splice(videos.findIndex((v) => v.id === a.id), 1);
+          return;
+        case "add_clip":
+        case "cut_done_video": {
+          const src = videos.find((v) => v.id === a.id)!;
+          const [start, end] = [a.start as number, a.end as number];
+          if (videos.some((v) => v.videoId === src.videoId && v.clipStart === start && v.clipEnd === end))
+            throw "This section is already in the list.";
+          const done = cmd === "cut_done_video";
+          if (done)
+            for (let p = 0; p <= 100; p += 20) {
+              emit("cut-progress", { id: src.id, percent: p });
+              await new Promise((r) => setTimeout(r, 150));
+            }
+          const clip: Video = {
+            ...src,
+            id: nextId++,
+            duration: end - start,
+            status: done ? "done" : "ready",
+            filePath: done ? src.filePath?.replace(/(\.\w+)$/, ` (${start}s-${end}s)$1`) ?? null : null,
+            completedAt: done ? now() : null,
+            createdAt: now(),
+            sizeEstimate: null,
+            clipStart: start,
+            clipEnd: end,
+            clipPrecise: a.precise as boolean,
+          };
+          videos.push(clip);
+          return clip;
+        }
+        case "allow_preview":
+          throw "Preview needs the desktop app.";
+        case "cancel_cut":
+        case "open_log_folder":
           return;
         case "remove_videos":
           for (const id of a.ids as number[]) videos.splice(videos.findIndex((v) => v.id === id), 1);
