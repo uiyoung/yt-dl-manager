@@ -14,7 +14,7 @@ export const lineControl = `${control} h-8`;
 
 /** 모든 버튼이 공유하는 바탕: 아이콘과 글자를 가운데 맞춰 나란히 */
 export const buttonBase =
-  'inline-flex items-center justify-center gap-[5px] whitespace-nowrap cursor-pointer disabled:cursor-default disabled:opacity-45';
+  'inline-flex items-center justify-center gap-1.25 whitespace-nowrap cursor-pointer disabled:cursor-default disabled:opacity-45';
 
 type Variant = 'default' | 'primary' | 'ghost' | 'retry';
 
@@ -78,7 +78,7 @@ export function Badge({ tone, children }: { tone?: 'info' | 'error'; children: R
   return (
     <span
       className={cx(
-        'shrink-0 whitespace-nowrap rounded-[10px] px-[7px] py-px text-[11px]',
+        'shrink-0 whitespace-nowrap rounded-[10px] px-1.75 py-px text-[11px]',
         tone === 'info' ? 'bg-info-bg text-info' : tone === 'error' ? 'bg-error-bg text-error' : 'bg-hover text-dim',
       )}
     >
@@ -87,11 +87,11 @@ export function Badge({ tone, children }: { tone?: 'info' | 'error'; children: R
   );
 }
 
-// 대기열·완료 목록이 같이 쓰는 클래스 묶음
+// queue, done 목록이 같이 쓰는 클래스 묶음
 export const viewClass = 'flex min-h-0 flex-1 flex-col gap-2.5';
 export const listClass = 'flex-1 overflow-y-auto rounded-lg border border-line bg-panel';
 export const rowClass = 'flex items-center gap-3 border-b border-line px-3 py-2.5 last:border-b-0';
 export const emptyClass =
   'flex flex-1 items-center justify-center rounded-lg border border-dashed border-line bg-panel text-dim';
-export const thumbClass = 'h-[63px] w-[112px] shrink-0 rounded-[4px] bg-bar object-cover';
-export const actionsClass = 'flex min-w-[190px] shrink-0 justify-end gap-1.5';
+export const thumbClass = 'h-15.75 w-28 shrink-0 rounded-sm bg-bar object-cover';
+export const actionsClass = 'flex min-w-47.5 shrink-0 justify-end gap-1.5';

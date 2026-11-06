@@ -1,6 +1,7 @@
 mod clip;
 mod commands;
 mod db;
+mod meta;
 mod queue;
 mod tools;
 mod url_parser;
@@ -45,7 +46,7 @@ pub fn run() {
             // 정보를 아직 못 가져온 항목(이전 실행에서 남은 것) 다시 조회
             if let Ok(pending) = db::pending_meta(&state.conn()) {
                 for v in pending {
-                    tauri::async_runtime::spawn(queue::fetch_meta(
+                    tauri::async_runtime::spawn(meta::fetch_meta(
                         handle.clone(),
                         state.clone(),
                         v.id,
@@ -56,7 +57,7 @@ pub fn run() {
             // 이전 버전에서 추가해 화질 목록이 없는 영상도 다시 조회
             if let Ok(list) = db::missing_heights(&state.conn()) {
                 for v in list {
-                    tauri::async_runtime::spawn(queue::fetch_meta(
+                    tauri::async_runtime::spawn(meta::fetch_meta(
                         handle.clone(),
                         state.clone(),
                         v.id,

@@ -16,7 +16,6 @@ interface AppStore {
   upsert: (vs: Video[]) => void;
   remove: (ids: number[]) => void;
   setSelected: (ids: number[], on: boolean) => void;
-  clearSelection: () => void;
   setSettings: (s: Settings) => void;
 }
 
@@ -27,28 +26,28 @@ export const useStore = create<AppStore>((set) => ({
   settings: null,
   metaPausedUntil: null,
   upsert: (vs) =>
-    set((st) => {
-      const videos = { ...st.videos };
-      let { progress, selected } = st;
-      for (const v of vs) {
-        videos[v.id] = v;
-        if (v.status !== "downloading" && progress[v.id]) {
+    set((state) => {
+      const videos = { ...state.videos };
+      let { progress, selected } = state;
+      for (const video of vs) {
+        videos[video.id] = video;
+        if (video.status !== "downloading" && progress[video.id]) {
           progress = { ...progress };
-          delete progress[v.id];
+          delete progress[video.id];
         }
-        // 완료되면 대기열에서 빠지므로 선택도 해제
-        if (v.status === "done" && selected[v.id]) {
+        // 방금 완료되면 대기열에서 빠지므로 선택도 해제 (done 탭의 선택은 그대로)
+        if (video.status === "done" && state.videos[video.id]?.status !== "done" && selected[video.id]) {
           selected = { ...selected };
-          delete selected[v.id];
+          delete selected[video.id];
         }
       }
       return { videos, progress, selected };
     }),
   remove: (ids) =>
-    set((st) => {
-      const videos = { ...st.videos };
-      const progress = { ...st.progress };
-      const selected = { ...st.selected };
+    set((state) => {
+      const videos = { ...state.videos };
+      const progress = { ...state.progress };
+      const selected = { ...state.selected };
       for (const id of ids) {
         delete videos[id];
         delete progress[id];
@@ -57,15 +56,14 @@ export const useStore = create<AppStore>((set) => ({
       return { videos, progress, selected };
     }),
   setSelected: (ids, on) =>
-    set((st) => {
-      const selected = { ...st.selected };
+    set((state) => {
+      const selected = { ...state.selected };
       for (const id of ids) {
         if (on) selected[id] = true;
         else delete selected[id];
       }
       return { selected };
     }),
-  clearSelection: () => set({ selected: {} }),
   setSettings: (settings) => set({ settings }),
 }));
 

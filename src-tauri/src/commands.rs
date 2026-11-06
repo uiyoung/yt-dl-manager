@@ -1,6 +1,7 @@
 //! 화면(React)에서 호출하는 Tauri 명령.
 
 use crate::db::{self, Settings, Video};
+use crate::meta;
 use crate::queue::{self, AppState};
 use crate::url_parser::{self, Link};
 use serde::Serialize;
@@ -72,7 +73,7 @@ pub async fn add_links(
             // 재생목록 안의 영상 링크: 사용자가 '재생목록 전체'를 고르면 펼친다.
             // 펼치지 못하면 그 영상 하나라도 넣는다.
             Link::Video(id) => match found.playlist.filter(|_| expand) {
-                Some(pid) => match queue::expand_playlist(&pid).await {
+                Some(pid) => match meta::expand_playlist(&pid).await {
                     Ok(list) => ids.extend(list.into_iter().map(|id| {
                         let url = url_parser::video_url(&id);
                         (id, url)
@@ -84,7 +85,7 @@ pub async fn add_links(
                 },
                 None => ids.push((id, found.url)),
             },
-            Link::Playlist(pid) => match queue::expand_playlist(&pid).await {
+            Link::Playlist(pid) => match meta::expand_playlist(&pid).await {
                 Ok(list) => ids.extend(list.into_iter().map(|id| {
                     let url = url_parser::video_url(&id);
                     (id, url)
@@ -125,7 +126,7 @@ pub async fn add_links(
         }
     }
     for v in &added {
-        tauri::async_runtime::spawn(queue::fetch_meta(
+        tauri::async_runtime::spawn(meta::fetch_meta(
             app.clone(),
             st.inner().clone(),
             v.id,
@@ -387,38 +388,18 @@ pub async fn check_tools() -> ToolStatus {
 
 // ---------- 구간 자르기 ----------
 
-/// 구간이 올바른지 확인한다. 영상 길이를 알면 그 안에 있어야 한다.
-fn check_range(v: &Video, start: f64, end: f64) -> Res<()> {
-    if v.clip().is_some() {
-        return Err("This is already a clip. Cut from the original video instead.".into());
-    }
-    if !(start.is_finite() && end.is_finite()) || start < 0.0 || end <= start {
-        return Err("The end must be after the start.".into());
-    }
-    if end - start < 0.5 {
-        return Err("The section is too short.".into());
-    }
-    if let Some(d) = v.duration {
-        // 길이는 초 단위로 반올림돼 있어 조금 넘는 것은 봐준다
-        if end > d + 1.0 {
-            return Err(format!("The end is past the end of the video ({}).", crate::clip::label(0.0, d).split('-').nth(1).unwrap()));
-        }
-    }
-    Ok(())
-}
-
 /// 대기열 항목에서 구간 항목을 하나 만들어 대기열에 넣는다. 받을 때는 그 구간만 받는다.
 #[tauri::command]
 pub fn add_clip(app: AppHandle, st: St, id: i64, start: f64, end: f64, precise: bool) -> Res<Video> {
     let v = db::get(&st.conn(), id).map_err(e)?.ok_or("Video not found.")?;
-    check_range(&v, start, end)?;
+    crate::clip::check_range(&v, start, end)?;
     let clip = db::insert_clip(&st.conn(), &v, start, end, precise, None)
         .map_err(e)?
         .ok_or("This section is already in the list.")?;
     log::info!("clip added #{} from #{id}: {} precise={precise}", clip.id, crate::clip::label(start, end));
     // 원본 정보를 아직 못 받았으면 구간 항목도 따로 조회한다
     if clip.meta_state == "pending" {
-        tauri::async_runtime::spawn(queue::fetch_meta(app.clone(), st.inner().clone(), clip.id, clip.url.clone()));
+        tauri::async_runtime::spawn(meta::fetch_meta(app.clone(), st.inner().clone(), clip.id, clip.url.clone()));
     }
     Ok(clip)
 }
@@ -436,107 +417,12 @@ pub fn allow_preview(app: AppHandle, st: St, id: i64) -> Res<String> {
     Ok(path)
 }
 
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-struct CutProgress {
-    id: i64,
-    percent: f64,
-}
-
 /// 완료한 영상에서 구간을 잘라 원본 옆에 새 파일로 저장하고, 완료 목록에 구간 항목으로 넣는다.
 /// 원본은 그대로 둔다. 썸네일은 따로 만들지 않는다 (원본의 썸네일을 함께 쓴다).
 #[tauri::command]
 pub async fn cut_done_video(app: AppHandle, st: St<'_>, id: i64, start: f64, end: f64, precise: bool) -> Res<Video> {
-    use tauri::Emitter;
-    use tokio::io::{AsyncBufReadExt, BufReader};
-
     let v = db::get(&st.conn(), id).map_err(e)?.ok_or("Video not found.")?;
-    check_range(&v, start, end)?;
-    let src = v.file_path.clone().ok_or("No file path.")?;
-    let src = std::path::PathBuf::from(src);
-    if !src.is_file() {
-        return Err("File not found. It may have been moved or deleted.".into());
-    }
-    if db::find_clip(&st.conn(), &v.video_id, start, end).map_err(e)?.is_some() {
-        return Err("A clip of this section is already in the list.".into());
-    }
-    let label = crate::clip::label(start, end);
-    let out = crate::clip::path_with_label(&src, &label);
-    if out.exists() {
-        return Err(format!(
-            "A file with this name already exists: {}",
-            out.file_name().unwrap_or_default().to_string_lossy()
-        ));
-    }
-    let ext = src.extension().map(|x| x.to_string_lossy().to_lowercase()).unwrap_or_default();
-    let audio_only = v.got_quality.as_deref() == Some("audio") || matches!(ext.as_str(), "m4a" | "mp3" | "opus" | "aac");
-    let args = crate::clip::ffmpeg_args(&src.to_string_lossy(), &out.to_string_lossy(), start, end, precise, audio_only);
-
-    log::info!("cut start #{id}: {}", crate::tools::command_line("ffmpeg", &args));
-    let started = std::time::Instant::now();
-    let mut child = crate::tools::command("ffmpeg").args(&args).spawn().map_err(|err| {
-        log::warn!("cut #{id}: can't run ffmpeg: {err}");
-        format!("Can't run ffmpeg: {err}")
-    })?;
-    let (tx, mut stop_rx) = tokio::sync::oneshot::channel();
-    st.cuts.lock().unwrap().insert(id, tx);
-
-    // 진행률: ffmpeg -progress 출력의 out_time_us를 구간 길이로 나눈다
-    let stdout = child.stdout.take().unwrap();
-    let app2 = app.clone();
-    let length = end - start;
-    let progress = tokio::spawn(async move {
-        let mut lines = BufReader::new(stdout).lines();
-        while let Ok(Some(l)) = lines.next_line().await {
-            if let Some(us) = l.strip_prefix("out_time_us=").and_then(|x| x.parse::<f64>().ok()) {
-                let percent = (us / 1e6 / length * 100.0).clamp(0.0, 100.0);
-                let _ = app2.emit("cut-progress", CutProgress { id, percent });
-            }
-        }
-    });
-    let stderr = child.stderr.take().unwrap();
-    let errors = tokio::spawn(async move {
-        let mut lines = BufReader::new(stderr).lines();
-        let mut last = Vec::new();
-        while let Ok(Some(l)) = lines.next_line().await {
-            if !l.trim().is_empty() {
-                last.push(l);
-            }
-        }
-        last
-    });
-
-    let result = tokio::select! {
-        status = child.wait() => match status {
-            Ok(s) if s.success() => Ok(()),
-            Ok(code) => {
-                let errs = errors.await.unwrap_or_default();
-                log::warn!("cut #{id}: ffmpeg exited with {:?}:\n{}", code.code(), errs.join("\n"));
-                Err(format!("ffmpeg failed: {}", errs.last().map(String::as_str).unwrap_or("unknown error")))
-            }
-            Err(err) => Err(format!("ffmpeg error: {err}")),
-        },
-        _ = &mut stop_rx => {
-            let _ = child.kill().await;
-            Err("Canceled.".to_string())
-        }
-    };
-    st.cuts.lock().unwrap().remove(&id);
-    let _ = progress.await;
-    match &result {
-        Ok(()) => log::info!("cut done #{id} in {:.1}s → {}", started.elapsed().as_secs_f64(), out.display()),
-        Err(msg) => log::info!("cut #{id} ended: {msg}"),
-    }
-    if let Err(msg) = result {
-        let _ = std::fs::remove_file(&out); // 만들다 만 파일은 지운다
-        return Err(msg);
-    }
-
-    let size = std::fs::metadata(&out).ok().map(|m| m.len() as i64);
-    let clip = db::insert_clip(&st.conn(), &v, start, end, precise, Some((&out.to_string_lossy(), size)))
-        .map_err(e)?
-        .ok_or("A clip of this section is already in the list.")?;
-    Ok(clip)
+    crate::clip::cut_file(&app, &st, &v, start, end, precise).await
 }
 
 /// 진행 중인 구간 자르기를 멈춘다

@@ -106,9 +106,9 @@ export function installDevMock() {
             const old = videos.find((v) => v.videoId === id);
             if (old) duplicates.push({ videoId: id, url, title: old.title, status: old.status });
             else {
-              const v = mk(id, `New video ${id}`, { metaState: "pending", heights: null });
-              videos.push(v);
-              added.push(v);
+              const video = mk(id, `New video ${id}`, { metaState: "pending", heights: null });
+              videos.push(video);
+              added.push(video);
             }
           }
           return { added, duplicates, pasteDuplicates, unrecognized, playlistErrors: [] };
@@ -116,27 +116,27 @@ export function installDevMock() {
         case "download_videos":
         case "stop_videos": {
           const start = cmd === "download_videos";
-          for (const v of videos)
-            if ((a.ids as number[]).includes(v.id)) {
-              if (start && (v.status === "ready" || v.status === "error"))
-                Object.assign(v, { status: "queued", errorMsg: null });
-              else if (!start && (v.status === "queued" || v.status === "downloading")) v.status = "ready";
+          for (const video of videos)
+            if ((a.ids as number[]).includes(video.id)) {
+              if (start && (video.status === "ready" || video.status === "error"))
+                Object.assign(video, { status: "queued", errorMsg: null });
+              else if (!start && (video.status === "queued" || video.status === "downloading")) video.status = "ready";
               else continue;
-              emit("video-updated", { ...v });
+              emit("video-updated", { ...video });
             }
           return;
         }
         case "set_output_dir": {
-          const v = videos.find((x) => x.id === a.id)!;
-          v.outputDir = (a.dir as string | null) ?? null;
-          emit("video-updated", { ...v });
+          const video = videos.find((x) => x.id === a.id)!;
+          video.outputDir = (a.dir as string | null) ?? null;
+          emit("video-updated", { ...video });
           return;
         }
         case "move_done_file": {
-          const v = videos.find((x) => x.id === a.id)!;
-          v.filePath = `${a.dir}/${v.filePath!.split("/").pop()}`;
-          emit("video-updated", { ...v });
-          return v;
+          const video = videos.find((x) => x.id === a.id)!;
+          video.filePath = `${a.dir}/${video.filePath!.split("/").pop()}`;
+          emit("video-updated", { ...video });
+          return video;
         }
         case "plugin:dialog|message": {
           // confirm()은 눌린 버튼 이름을 돌려받는다

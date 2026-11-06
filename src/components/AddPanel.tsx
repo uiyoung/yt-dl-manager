@@ -16,7 +16,7 @@ const toneClass: Record<Tone, string> = {
 
 /** 주소·메시지를 고정폭 글자로, 넘치면 말줄임 */
 const urlClass = 'truncate font-mono text-dim select-text';
-const li = 'flex min-w-0 items-center gap-1.5';
+const listItemClass = 'flex min-w-0 items-center gap-1.5';
 
 function summarize(r: AddResult): { text: string; tone: Tone } {
   const parts: string[] = [];
@@ -56,9 +56,7 @@ function DetailList({ title, children, count }: { title: string; count: number; 
       <summary className='cursor-pointer text-[12px] font-semibold'>
         {title} ({count})
       </summary>
-      <ul className='mt-1 flex max-h-[140px] flex-col gap-[3px] overflow-y-auto pl-3.5 text-[12px] text-fg'>
-        {children}
-      </ul>
+      <ul className='mt-1 flex max-h-35 flex-col gap-0.75 overflow-y-auto pl-3.5 text-[12px] text-fg'>{children}</ul>
     </details>
   );
 }
@@ -116,7 +114,7 @@ export function AddPanel() {
           }}
           rows={3}
         />
-        <Button variant='primary' className='min-w-[88px]' onClick={add} disabled={busy || !text.trim()}>
+        <Button variant='primary' className='min-w-22' onClick={add} disabled={busy || !text.trim()}>
           {busy ? 'Adding…' : 'Add'}
         </Button>
       </div>
@@ -129,7 +127,7 @@ export function AddPanel() {
               <>
                 <DetailList title='Already in list' count={r.duplicates.length}>
                   {r.duplicates.map((d) => (
-                    <li key={d.videoId} className={li}>
+                    <li key={d.videoId} className={listItemClass}>
                       <Badge>{d.status === 'done' ? 'Done' : 'Queue'}</Badge>
                       {d.title && <span className='max-w-[40%] truncate'>{d.title}</span>}
                       <span className={urlClass}>{d.url}</span>
@@ -138,21 +136,21 @@ export function AddPanel() {
                 </DetailList>
                 <DetailList title='Repeated in this paste' count={r.pasteDuplicates.length}>
                   {r.pasteDuplicates.map((u, i) => (
-                    <li key={i} className={li}>
+                    <li key={i} className={listItemClass}>
                       <span className={urlClass}>{u}</span>
                     </li>
                   ))}
                 </DetailList>
                 <DetailList title='Unrecognized links' count={r.unrecognized.length}>
                   {r.unrecognized.map((u, i) => (
-                    <li key={i} className={li}>
+                    <li key={i} className={listItemClass}>
                       <span className={urlClass}>{u}</span>
                     </li>
                   ))}
                 </DetailList>
                 <DetailList title='Playlist errors' count={r.playlistErrors.length}>
                   {r.playlistErrors.map((m, i) => (
-                    <li key={i} className={li}>
+                    <li key={i} className={listItemClass}>
                       <span className={urlClass}>{m}</span>
                     </li>
                   ))}

@@ -21,26 +21,32 @@ const dateOf = (v: Video, list: 'queue' | 'done') => (list === 'done' ? (v.compl
 export const sizeOf = (v: Video) => v.fileSize ?? v.sizeEstimate;
 
 /** 값이 없는 항목은 방향과 상관없이 항상 맨 뒤로 */
-function cmpNullable<T>(a: T | null | undefined, b: T | null | undefined, cmp: (x: T, y: T) => number, desc: boolean) {
-  const an = a == null || a === '';
-  const bn = b == null || b === '';
-  if (an || bn) return an === bn ? 0 : an ? 1 : -1;
-  const r = cmp(a as T, b as T);
-  return desc ? -r : r;
+function compareNullable<T>(
+  a: T | null | undefined,
+  b: T | null | undefined,
+  compare: (x: T, y: T) => number,
+  desc: boolean,
+) {
+  const aMissing = a == null || a === '';
+  const bMissing = b == null || b === '';
+  if (aMissing || bMissing) return aMissing === bMissing ? 0 : aMissing ? 1 : -1;
+  const result = compare(a as T, b as T);
+  return desc ? -result : result;
 }
 
-const num = (x: number, y: number) => x - y;
-const text = (x: string, y: string) => x.localeCompare(y, 'ko');
+const compareNumbers = (x: number, y: number) => x - y;
+const compareText = (x: string, y: string) => x.localeCompare(y, 'ko');
 
 export function sortVideos(list: Video[], sort: Sort, which: 'queue' | 'done'): Video[] {
   const { key, desc } = sort;
   return [...list].sort((a, b) => {
-    let r = 0;
-    if (key === 'date') r = desc ? dateOf(b, which) - dateOf(a, which) : dateOf(a, which) - dateOf(b, which);
-    else if (key === 'channel') r = cmpNullable(a.channel, b.channel, text, desc);
-    else if (key === 'duration') r = cmpNullable(a.duration, b.duration, num, desc);
-    else if (key === 'size') r = cmpNullable(sizeOf(a), sizeOf(b), num, desc);
-    return r || a.id - b.id;
+    let result = 0;
+    if (key === 'date') result = desc ? dateOf(b, which) - dateOf(a, which) : dateOf(a, which) - dateOf(b, which);
+    else if (key === 'channel') result = compareNullable(a.channel, b.channel, compareText, desc);
+    else if (key === 'duration') result = compareNullable(a.duration, b.duration, compareNumbers, desc);
+    else if (key === 'size') result = compareNullable(sizeOf(a), sizeOf(b), compareNumbers, desc);
+    // 같으면 먼저 넣은 순서대로
+    return result || a.id - b.id;
   });
 }
 
@@ -49,19 +55,24 @@ export function useSort(storageKey: string, initial: Sort) {
   const [sort, setSort] = useState<Sort>(() => {
     try {
       const saved = localStorage.getItem(storageKey);
-      if (saved) return { ...initial, ...JSON.parse(saved) };
+      if (saved) {
+        return { ...initial, ...JSON.parse(saved) };
+      }
     } catch {
       /* 저장소를 못 쓰면 기본값 */
     }
+
     return initial;
   });
-  const update = (s: Sort) => {
-    setSort(s);
+
+  const update = (next: Sort) => {
+    setSort(next);
     try {
-      localStorage.setItem(storageKey, JSON.stringify(s));
+      localStorage.setItem(storageKey, JSON.stringify(next));
     } catch {
       /* 무시 */
     }
   };
+
   return [sort, update] as const;
 }

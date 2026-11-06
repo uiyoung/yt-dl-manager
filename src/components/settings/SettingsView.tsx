@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
-import { api } from '../api';
-import { useStore } from '../store';
-import { getTheme, saveTheme, type Theme } from '../theme';
-import { Button, cx, lineControl } from '../ui';
-import { FILENAME_PRESETS, QUALITY_OPTIONS, type Settings, type ToolInfo, type ToolStatus } from '../types';
+import { api } from '../../api';
+import { useStore } from '../../store';
+import { getTheme, saveTheme, type Theme } from '../../theme';
+import { Button, cx, lineControl } from '../../ui';
+import { FILENAME_PRESETS, QUALITY_OPTIONS, type Settings, type ToolInfo, type ToolStatus } from '../../types';
 
 const field = 'flex flex-col gap-1.5';
-const narrow = 'max-w-[360px]';
+const narrow = 'max-w-90';
 const label = 'font-semibold';
 // 브라우저 기본 <small> 크기(smaller)를 유지한다
 const hint = 'text-dim [font-size:smaller]';
@@ -56,7 +56,7 @@ function ToolRow({
         )}
       </div>
       {info && (
-        <code className='truncate pl-[72px] text-[12px] text-dim' title={info.path}>
+        <code className='truncate pl-18 text-[12px] text-dim' title={info.path}>
           {info.path}
         </code>
       )}
@@ -121,7 +121,7 @@ export function SettingsView() {
         <label className={field}>
           <span className={label}>Default quality</span>
           <select
-            className={cx(lineControl, 'w-[200px]')}
+            className={cx(lineControl, 'w-50')}
             value={draft.defaultQuality}
             onChange={(e) => upd({ defaultQuality: e.target.value })}
           >
@@ -169,7 +169,7 @@ export function SettingsView() {
           <input
             type='checkbox'
             // 브라우저 기본 체크박스 여백
-            className='mt-[3px] mr-[3px] mb-[3px] ml-1'
+            className='mt-0.75 mr-0.75 mb-0.75 ml-1'
             checked={draft.saveThumbnail}
             onChange={(e) => upd({ saveThumbnail: e.target.checked })}
           />

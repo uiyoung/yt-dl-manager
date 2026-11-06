@@ -1,7 +1,9 @@
 // 앱에서 쓰는 아이콘 (Lucide). 크기·굵기를 한곳에서 맞춘다.
 import {
-  ArrowDown,
-  ArrowUp,
+  ArrowDownWideNarrow,
+  ArrowUpNarrowWide,
+  Check,
+  ChevronDown,
   CircleCheck,
   Download,
   EllipsisVertical,
@@ -9,6 +11,7 @@ import {
   Play,
   RotateCw,
   Scissors,
+  Search,
   Settings,
   Square,
   Trash2,
@@ -23,6 +26,9 @@ function icon(Icon: LucideIcon) {
 }
 
 export const TrashIcon = icon(Trash2);
+export const CheckIcon = icon(Check);
+export const ChevronDownIcon = icon(ChevronDown);
+export const SearchIcon = icon(Search);
 export const MoreIcon = icon(EllipsisVertical);
 export const PlayIcon = icon(Play);
 export const DownloadIcon = icon(Download);
@@ -35,6 +41,6 @@ export const SettingsIcon = icon(Settings);
 export const CutIcon = icon(Scissors);
 
 export function SortDirIcon({ desc }: { desc: boolean }) {
-  const Icon = desc ? ArrowDown : ArrowUp;
+  const Icon = desc ? ArrowDownWideNarrow : ArrowUpNarrowWide;
   return <Icon className='shrink-0' size={16} strokeWidth={2} aria-hidden />;
 }

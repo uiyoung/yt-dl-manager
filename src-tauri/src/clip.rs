@@ -1,4 +1,9 @@
-//! 구간 자르기: 파일 이름에 붙일 구간 표시와 yt-dlp·ffmpeg 인자.
+//! 구간 자르기: 파일 이름에 붙일 구간 표시, yt-dlp·ffmpeg 인자, 완료한 영상을 ffmpeg로 자르기.
+
+use crate::db::{self, Video};
+use crate::queue::AppState;
+use serde::Serialize;
+use tauri::AppHandle;
 
 /// 구간을 파일 이름에 쓸 수 있는 꼴로: 90~165초 → "1m30s-2m45s".
 /// Windows에서 쓸 수 없는 ':'은 쓰지 않는다.
@@ -86,6 +91,130 @@ pub fn ffmpeg_args(input: &str, output: &str, start: f64, end: f64, precise: boo
     }
     a.extend(["-movflags".into(), "+faststart".into(), output.into()]);
     a
+}
+
+// ---------- 완료한 영상 자르기 ----------
+
+/// 구간이 올바른지 확인한다. 영상 길이를 알면 그 안에 있어야 한다.
+pub fn check_range(v: &Video, start: f64, end: f64) -> Result<(), String> {
+    if v.clip().is_some() {
+        return Err("This is already a clip. Cut from the original video instead.".into());
+    }
+    if !(start.is_finite() && end.is_finite()) || start < 0.0 || end <= start {
+        return Err("The end must be after the start.".into());
+    }
+    if end - start < 0.5 {
+        return Err("The section is too short.".into());
+    }
+    if let Some(d) = v.duration {
+        // 길이는 초 단위로 반올림돼 있어 조금 넘는 것은 봐준다
+        if end > d + 1.0 {
+            return Err(format!("The end is past the end of the video ({}).", label(0.0, d).split('-').nth(1).unwrap()));
+        }
+    }
+    Ok(())
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct CutProgress {
+    id: i64,
+    percent: f64,
+}
+
+/// 완료한 영상에서 구간을 잘라 원본 옆에 새 파일로 저장하고, 완료 목록에 구간 항목으로 넣는다.
+/// 원본은 그대로 둔다. 썸네일은 따로 만들지 않는다 (원본의 썸네일을 함께 쓴다).
+pub async fn cut_file(app: &AppHandle, st: &AppState, v: &Video, start: f64, end: f64, precise: bool) -> Result<Video, String> {
+    use tauri::Emitter;
+    use tokio::io::{AsyncBufReadExt, BufReader};
+
+    let id = v.id;
+    check_range(v, start, end)?;
+    let src = v.file_path.clone().ok_or("No file path.")?;
+    let src = std::path::PathBuf::from(src);
+    if !src.is_file() {
+        return Err("File not found. It may have been moved or deleted.".into());
+    }
+    if db::find_clip(&st.conn(), &v.video_id, start, end).map_err(|err| err.to_string())?.is_some() {
+        return Err("A clip of this section is already in the list.".into());
+    }
+    let label = label(start, end);
+    let out = path_with_label(&src, &label);
+    if out.exists() {
+        return Err(format!(
+            "A file with this name already exists: {}",
+            out.file_name().unwrap_or_default().to_string_lossy()
+        ));
+    }
+    let ext = src.extension().map(|x| x.to_string_lossy().to_lowercase()).unwrap_or_default();
+    let audio_only = v.got_quality.as_deref() == Some("audio") || matches!(ext.as_str(), "m4a" | "mp3" | "opus" | "aac");
+    let args = ffmpeg_args(&src.to_string_lossy(), &out.to_string_lossy(), start, end, precise, audio_only);
+
+    log::info!("cut start #{id}: {}", crate::tools::command_line("ffmpeg", &args));
+    let started = std::time::Instant::now();
+    let mut child = crate::tools::command("ffmpeg").args(&args).spawn().map_err(|err| {
+        log::warn!("cut #{id}: can't run ffmpeg: {err}");
+        format!("Can't run ffmpeg: {err}")
+    })?;
+    let (tx, mut stop_rx) = tokio::sync::oneshot::channel();
+    st.cuts.lock().unwrap().insert(id, tx);
+
+    // 진행률: ffmpeg -progress 출력의 out_time_us를 구간 길이로 나눈다
+    let stdout = child.stdout.take().unwrap();
+    let app2 = app.clone();
+    let length = end - start;
+    let progress = tokio::spawn(async move {
+        let mut lines = BufReader::new(stdout).lines();
+        while let Ok(Some(l)) = lines.next_line().await {
+            if let Some(us) = l.strip_prefix("out_time_us=").and_then(|x| x.parse::<f64>().ok()) {
+                let percent = (us / 1e6 / length * 100.0).clamp(0.0, 100.0);
+                let _ = app2.emit("cut-progress", CutProgress { id, percent });
+            }
+        }
+    });
+    let stderr = child.stderr.take().unwrap();
+    let errors = tokio::spawn(async move {
+        let mut lines = BufReader::new(stderr).lines();
+        let mut last = Vec::new();
+        while let Ok(Some(l)) = lines.next_line().await {
+            if !l.trim().is_empty() {
+                last.push(l);
+            }
+        }
+        last
+    });
+
+    let result = tokio::select! {
+        status = child.wait() => match status {
+            Ok(s) if s.success() => Ok(()),
+            Ok(code) => {
+                let errs = errors.await.unwrap_or_default();
+                log::warn!("cut #{id}: ffmpeg exited with {:?}:\n{}", code.code(), errs.join("\n"));
+                Err(format!("ffmpeg failed: {}", errs.last().map(String::as_str).unwrap_or("unknown error")))
+            }
+            Err(err) => Err(format!("ffmpeg error: {err}")),
+        },
+        _ = &mut stop_rx => {
+            let _ = child.kill().await;
+            Err("Canceled.".to_string())
+        }
+    };
+    st.cuts.lock().unwrap().remove(&id);
+    let _ = progress.await;
+    match &result {
+        Ok(()) => log::info!("cut done #{id} in {:.1}s → {}", started.elapsed().as_secs_f64(), out.display()),
+        Err(msg) => log::info!("cut #{id} ended: {msg}"),
+    }
+    if let Err(msg) = result {
+        let _ = std::fs::remove_file(&out); // 만들다 만 파일은 지운다
+        return Err(msg);
+    }
+
+    let size = std::fs::metadata(&out).ok().map(|m| m.len() as i64);
+    let clip = db::insert_clip(&st.conn(), v, start, end, precise, Some((&out.to_string_lossy(), size)))
+        .map_err(|err| err.to_string())?
+        .ok_or("A clip of this section is already in the list.")?;
+    Ok(clip)
 }
 
 #[cfg(test)]

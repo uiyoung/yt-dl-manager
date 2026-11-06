@@ -2,11 +2,12 @@ import { useEffect, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { initStore, useStore } from './store';
 import { AddPanel } from './components/AddPanel';
-import { QueueView } from './components/QueueView';
-import { DoneView } from './components/DoneView';
-import { SettingsView } from './components/SettingsView';
+import { QueueView } from './components/queue/QueueView';
+import { DoneView } from './components/done/DoneView';
+import { SettingsView } from './components/settings/SettingsView';
 import { Toast } from './toast';
 import { CutDialogHost } from './components/CutDialog';
+import { ContextMenuHost } from './components/RowMenu';
 import { buttonBase, cx } from './ui';
 import { DoneIcon, QueueIcon, SettingsIcon } from './icons';
 
@@ -26,11 +27,11 @@ function StatusBar({ tab }: { tab: Tab }) {
   const c = useStore(
     useShallow((s) => {
       const c = { ready: 0, active: 0, failed: 0, done: 0 };
-      for (const v of Object.values(s.videos)) {
-        if (v.status === 'ready') c.ready++;
-        else if (v.status === 'queued' || v.status === 'downloading') c.active++;
-        else if (v.status === 'error') c.failed++;
-        else if (v.status === 'done') c.done++;
+      for (const video of Object.values(s.videos)) {
+        if (video.status === 'ready') c.ready++;
+        else if (video.status === 'queued' || video.status === 'downloading') c.active++;
+        else if (video.status === 'error') c.failed++;
+        else if (video.status === 'done') c.done++;
       }
       return c;
     }),
@@ -61,9 +62,15 @@ function StatusBar({ tab }: { tab: Tab }) {
 export default function App() {
   const [tab, setTab] = useState<Tab>('queue');
   const [error, setError] = useState<string | null>(null);
+
   const queueCount = useStore((s) => {
     let q = 0;
-    for (const v of Object.values(s.videos)) if (v.status !== 'done') q++;
+    for (const video of Object.values(s.videos)) {
+      if (video.status !== 'done') {
+        q++;
+      }
+    }
+
     return q;
   });
 
@@ -81,7 +88,7 @@ export default function App() {
           {/* 대기열에 항목이 있으면 파란색으로, 비었으면 흐리게 */}
           <span
             className={cx(
-              'rounded-[10px] px-[7px] py-px text-[12px] tabular-nums',
+              'rounded-[10px] px-1.75 py-px text-[12px] tabular-nums',
               queueCount ? 'bg-info-bg font-semibold text-info' : 'bg-hover text-dim',
             )}
           >
@@ -109,6 +116,7 @@ export default function App() {
       {tab === 'settings' && <SettingsView />}
       <Toast />
       <CutDialogHost />
+      <ContextMenuHost />
       <StatusBar tab={tab} />
     </main>
   );

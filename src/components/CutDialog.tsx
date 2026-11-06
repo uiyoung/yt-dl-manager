@@ -4,7 +4,7 @@ import { convertFileSrc } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { api } from '../api';
 import { useStore } from '../store';
-import { fmtTime, fmtTimeField, parseTime } from '../format';
+import { formatTime, formatTimeField, parseTime } from '../format';
 import { toast } from '../toast';
 import type { Video } from '../types';
 import { Button, cx, lineControl } from '../ui';
@@ -24,23 +24,23 @@ const closeCut = () => useCut.setState({ target: null });
 /** 앱에 한 번만 두면, openCut()으로 연 창을 띄운다 */
 export function CutDialogHost() {
   const target = useCut((s) => s.target);
-  const v = useStore((s) => (target ? s.videos[target.id] : undefined));
-  if (!target || !v) return null;
+  const video = useStore((s) => (target ? s.videos[target.id] : undefined));
+  if (!target || !video) return null;
   // key: 다른 영상을 열면 입력값을 새로 시작한다
-  return <CutDialog key={`${target.mode}-${v.id}`} v={v} mode={target.mode} />;
+  return <CutDialog key={`${target.mode}-${video.id}`} video={video} mode={target.mode} />;
 }
 
 const label = 'font-semibold';
 const hint = 'text-dim [font-size:smaller]';
 
-function CutDialog({ v, mode }: { v: Video; mode: Mode }) {
+function CutDialog({ video, mode }: { video: Video; mode: Mode }) {
   const dialog = useRef<HTMLDialogElement>(null);
-  const video = useRef<HTMLVideoElement>(null);
+  const player = useRef<HTMLVideoElement>(null);
   // 1시간 넘는 영상이면 시·분·초로 입력받는다
-  const long = (v.duration ?? 0) >= 3600;
-  const fmt = (sec: number) => fmtTimeField(sec, long);
-  const [startText, setStartText] = useState(fmt(0));
-  const [endText, setEndText] = useState(v.duration ? fmt(v.duration) : '');
+  const long = (video.duration ?? 0) >= 3600;
+  const toText = (sec: number) => formatTimeField(sec, long);
+  const [startText, setStartText] = useState(toText(0));
+  const [endText, setEndText] = useState(video.duration ? toText(video.duration) : '');
   const [precise, setPrecise] = useState(false);
   const [preview, setPreview] = useState<{ src: string | null; error: string | null }>({ src: null, error: null });
   const [busy, setBusy] = useState(false);
@@ -57,21 +57,21 @@ function CutDialog({ v, mode }: { v: Video; mode: Mode }) {
   useEffect(() => {
     if (mode !== 'done') return;
     api
-      .allowPreview(v.id)
+      .allowPreview(video.id)
       .then((path) => setPreview({ src: convertFileSrc(path), error: null }))
       .catch((e) => setPreview({ src: null, error: String(e) }));
-  }, [mode, v.id]);
+  }, [mode, video.id]);
 
   // 자르는 중 진행률
   useEffect(() => {
     if (mode !== 'done') return;
     const off = listen<{ id: number; percent: number }>('cut-progress', (e) => {
-      if (e.payload.id === v.id) setPercent(e.payload.percent);
+      if (e.payload.id === video.id) setPercent(e.payload.percent);
     });
     return () => {
       off.then((f) => f());
     };
-  }, [mode, v.id]);
+  }, [mode, video.id]);
 
   const start = parseTime(startText);
   const end = parseTime(endText);
@@ -82,8 +82,8 @@ function CutDialog({ v, mode }: { v: Video; mode: Mode }) {
         ? 'Enter the end like 2:45 or 165.'
         : end <= start
           ? 'The end must be after the start.'
-          : v.duration && end > v.duration + 1
-            ? `The end is past the end of the video (${fmtTime(v.duration)}).`
+          : video.duration && end > video.duration + 1
+            ? `The end is past the end of the video (${formatTime(video.duration)}).`
             : null;
 
   function close() {
@@ -93,14 +93,14 @@ function CutDialog({ v, mode }: { v: Video; mode: Mode }) {
 
   /** 미리보기의 지금 위치를 시작 또는 끝으로 */
   function setFromPlayer(which: 'start' | 'end') {
-    const t = video.current?.currentTime;
+    const t = player.current?.currentTime;
     if (t == null) return;
-    (which === 'start' ? setStartText : setEndText)(fmt(t));
+    (which === 'start' ? setStartText : setEndText)(toText(t));
   }
 
   /** 정한 구간만 재생해 본다 */
   function playSection() {
-    const el = video.current;
+    const el = player.current;
     if (!el || start == null || end == null) return;
     el.currentTime = start;
     stopAt.current = end;
@@ -113,13 +113,13 @@ function CutDialog({ v, mode }: { v: Video; mode: Mode }) {
     setBusy(true);
     try {
       if (mode === 'queue') {
-        const clip = await api.addClip(v.id, start, end, precise);
+        const clip = await api.addClip(video.id, start, end, precise);
         useStore.getState().upsert([clip]);
         toast('Clip added to the queue');
       } else {
-        video.current?.pause();
+        player.current?.pause();
         setPercent(0);
-        const clip = await api.cutDoneVideo(v.id, start, end, precise);
+        const clip = await api.cutDoneVideo(video.id, start, end, precise);
         useStore.getState().upsert([clip]);
         toast('Clip saved');
       }
@@ -132,7 +132,7 @@ function CutDialog({ v, mode }: { v: Video; mode: Mode }) {
     }
   }
 
-  const fileName = v.filePath?.split(/[\\/]/).pop() ?? '';
+  const fileName = video.filePath?.split(/[\\/]/).pop() ?? '';
 
   return (
     <dialog
@@ -153,16 +153,16 @@ function CutDialog({ v, mode }: { v: Video; mode: Mode }) {
       >
         <header className='flex flex-col gap-1'>
           <h2 className='text-[16px] font-semibold'>Cut a section</h2>
-          <div className='truncate text-dim' title={v.title ?? v.url}>
-            {v.title ?? v.url}
-            {v.duration ? ` · ${fmtTime(v.duration)}` : ''}
+          <div className='truncate text-dim' title={video.title ?? video.url}>
+            {video.title ?? video.url}
+            {video.duration ? ` · ${formatTime(video.duration)}` : ''}
           </div>
         </header>
 
         {mode === 'done' &&
           (preview.src ? (
             <video
-              ref={video}
+              ref={player}
               className='aspect-video w-full rounded-md bg-black'
               src={preview.src}
               controls
@@ -176,7 +176,7 @@ function CutDialog({ v, mode }: { v: Video; mode: Mode }) {
               }}
               onSeeking={() => {
                 // 사용자가 직접 옮기면 '구간 재생'을 멈춘다
-                if (!video.current || video.current.paused) stopAt.current = null;
+                if (!player.current || player.current.paused) stopAt.current = null;
               }}
               onError={() =>
                 setPreview({
@@ -192,14 +192,14 @@ function CutDialog({ v, mode }: { v: Video; mode: Mode }) {
           ))}
 
         <div className='flex flex-wrap items-end gap-3'>
-          <TimeField label='Start' value={startText} onChange={setStartText} disabled={busy} long={long} max={v.duration}>
+          <TimeField label='Start' value={startText} onChange={setStartText} disabled={busy} long={long} max={video.duration}>
             {mode === 'done' && preview.src && (
               <Button type='button' onClick={() => setFromPlayer('start')} disabled={busy} title='Use the current position'>
                 Set to current
               </Button>
             )}
           </TimeField>
-          <TimeField label='End' value={endText} onChange={setEndText} disabled={busy} long={long} max={v.duration}>
+          <TimeField label='End' value={endText} onChange={setEndText} disabled={busy} long={long} max={video.duration}>
             {mode === 'done' && preview.src && (
               <Button type='button' onClick={() => setFromPlayer('end')} disabled={busy} title='Use the current position'>
                 Set to current
@@ -213,13 +213,13 @@ function CutDialog({ v, mode }: { v: Video; mode: Mode }) {
           )}
         </div>
         <div className={cx('-mt-2', problem ? 'text-error' : 'text-dim')}>
-          {problem ?? `Length ${fmtTime(end! - start!)}`}
+          {problem ?? `Length ${formatTime(end! - start!)}`}
         </div>
 
         <label className='flex cursor-pointer items-start gap-2'>
           <input
             type='checkbox'
-            className='mt-[3px] mr-[3px] mb-[3px] ml-1'
+            className='mt-0.75 mr-0.75 mb-0.75 ml-1'
             checked={precise}
             disabled={busy}
             onChange={(e) => setPrecise(e.target.checked)}
@@ -251,7 +251,7 @@ function CutDialog({ v, mode }: { v: Video; mode: Mode }) {
 
         <footer className='flex justify-end gap-2'>
           {busy && mode === 'done' ? (
-            <Button type='button' onClick={() => api.cancelCut(v.id)}>
+            <Button type='button' onClick={() => api.cancelCut(video.id)}>
               Stop
             </Button>
           ) : (
@@ -290,21 +290,21 @@ function TimeField({
   max: number | null;
   children?: React.ReactNode;
 }) {
-  const fmt = (sec: number) => fmtTimeField(sec, long);
+  const toText = (sec: number) => formatTimeField(sec, long);
   return (
     <label className='flex flex-col gap-1.5'>
       <span className={label}>{text}</span>
       <span className='flex gap-2'>
         <input
-          className={cx(lineControl, 'w-[110px] font-mono text-[13px]')}
+          className={cx(lineControl, 'w-27.5 font-mono text-[13px]')}
           value={value}
-          placeholder={fmt(0)}
+          placeholder={toText(0)}
           title='Type like 1:30 or 90 · ↑/↓ moves 1 second, Shift+↑/↓ 0.1 second'
           disabled={disabled}
           onChange={(e) => onChange(e.target.value)}
           onBlur={() => {
             const t = parseTime(value);
-            if (t != null) onChange(fmt(t));
+            if (t != null) onChange(toText(t));
           }}
           onKeyDown={(e) => {
             if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
@@ -312,7 +312,7 @@ function TimeField({
             const step = (e.shiftKey ? 0.1 : 1) * (e.key === 'ArrowUp' ? 1 : -1);
             let t = Math.max(0, Math.round(((parseTime(value) ?? 0) + step) * 10) / 10);
             if (max != null) t = Math.min(t, max);
-            onChange(fmt(t));
+            onChange(toText(t));
           }}
         />
         {children}
