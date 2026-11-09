@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { Video } from './types';
 
 export type SortKey = 'date' | 'channel' | 'duration' | 'size';
+
 export interface Sort {
   key: SortKey;
   desc: boolean;

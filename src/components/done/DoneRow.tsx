@@ -20,15 +20,7 @@ export const ROW_HEIGHT = 84;
 const qualityLabel = (q: string) =>
   /^\d+$/.test(q) ? formatHeight(Number(q)) : (QUALITY_OPTIONS.find((o) => o.value === q)?.label ?? q);
 
-/** done 목록 한 줄 */
-export const DoneRow = memo(function DoneRow({
-  video,
-  index,
-  top,
-  last,
-  measure,
-  selection,
-}: {
+interface DoneRowProps {
   video: Video;
   index: number;
   /** 목록 맨 위에서부터의 위치(px) */
@@ -36,8 +28,11 @@ export const DoneRow = memo(function DoneRow({
   last: boolean;
   measure: (el: HTMLElement | null) => void;
   selection: ListSelection;
-}) {
-  const checked = useStore((s) => !!s.selected[video.id]);
+}
+
+/** done 목록 한 줄 */
+export const DoneRow = memo(function DoneRow({ video, index, top, last, measure, selection }: DoneRowProps) {
+  const checked = useStore((state) => !!state.selected[video.id]);
   const menuTarget = useIsMenuTarget(video.id);
 
   return (
@@ -91,6 +86,7 @@ export const DoneRow = memo(function DoneRow({
         </div>
         <div className='text-[12px] text-dim'>Completed {formatDate(video.completedAt)}</div>
       </div>
+
       <div className={actionsClass}>
         {video.filePath && (
           <Button onClick={() => tryOpen(() => api.openDoneFile(video.id))}>

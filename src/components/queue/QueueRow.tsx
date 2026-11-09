@@ -19,50 +19,13 @@ import { actionsClass, Badge, Button, cx, rowClass, thumbClass } from '../../ui'
 const statusLine = 'flex min-w-0 items-center gap-2 text-[12px]';
 const bar = 'relative h-1.5 max-w-[320px] flex-1 overflow-hidden rounded-[3px] bg-bar';
 
-const ProgressInfo = memo(function ProgressInfo({ id }: { id: number }) {
-  const progress = useStore((s) => s.progress[id]);
-  if (!progress) {
-    return <div className={statusLine}>Starting…</div>;
-  }
-
-  if (progress.stage === 'processing') {
-    return (
-      <div className={statusLine}>
-        <div
-          className={cx(
-            bar,
-            "after:absolute after:inset-0 after:w-[30%] after:animate-slide after:bg-highlight after:content-['']",
-          )}
-        />
-        <span>Processing file…</span>
-      </div>
-    );
-  }
-
-  return (
-    <div className={statusLine}>
-      <div className={bar}>
-        <div
-          className='h-full bg-highlight transition-[width] duration-250 ease-linear'
-          style={{ width: `${progress.percent}%` }}
-        />
-      </div>
-      <span className='whitespace-nowrap text-dim tabular-nums'>
-        {progress.percent.toFixed(1)}%{progress.total ? ` · ${formatBytes(progress.total)}` : ''}
-        {progress.speed ? ` · ${formatBytes(progress.speed)}/s` : ''}
-        {progress.eta != null ? ` · ${formatDuration(progress.eta)} left` : ''}
-      </span>
-    </div>
-  );
-});
-
 /** 대기열 한 줄. 클릭으로 선택을 켜고 끈다 (Shift+클릭 범위는 selection이 처리) */
 export const QueueRow = memo(function QueueRow({ id, selection }: { id: number; selection: ListSelection }) {
-  const video = useStore((s) => s.videos[id]);
+  const video = useStore((state) => state.videos[id]);
   if (!video) return null;
 
   const size = video.sizeEstimate ? `~${formatBytes(video.sizeEstimate)}` : null;
-  const checked = useStore((s) => !!s.selected[id]);
+  const checked = useStore((state) => !!state.selected[id]);
   const menuTarget = useIsMenuTarget(id);
 
   return (
@@ -127,6 +90,43 @@ export const QueueRow = memo(function QueueRow({ id, selection }: { id: number; 
         </Button>
       </div>
     </li>
+  );
+});
+
+const ProgressInfo = memo(function ProgressInfo({ id }: { id: number }) {
+  const progress = useStore((state) => state.progress[id]);
+  if (!progress) {
+    return <div className={statusLine}>Starting…</div>;
+  }
+
+  if (progress.stage === 'processing') {
+    return (
+      <div className={statusLine}>
+        <div
+          className={cx(
+            bar,
+            "after:absolute after:inset-0 after:w-[30%] after:animate-slide after:bg-highlight after:content-['']",
+          )}
+        />
+        <span>Processing file…</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className={statusLine}>
+      <div className={bar}>
+        <div
+          className='h-full bg-highlight transition-[width] duration-250 ease-linear'
+          style={{ width: `${progress.percent}%` }}
+        />
+      </div>
+      <span className='whitespace-nowrap text-dim tabular-nums'>
+        {progress.percent.toFixed(1)}%{progress.total ? ` · ${formatBytes(progress.total)}` : ''}
+        {progress.speed ? ` · ${formatBytes(progress.speed)}/s` : ''}
+        {progress.eta != null ? ` · ${formatDuration(progress.eta)} left` : ''}
+      </span>
+    </div>
   );
 });
 

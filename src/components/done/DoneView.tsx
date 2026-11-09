@@ -16,7 +16,7 @@ export function DoneView() {
     const q = query.trim().toLowerCase();
     // 제목·채널·영상 ID로 찾는다
     const filtered = done.filter(
-      (v) => !q || `${v.title ?? ''} ${v.channel ?? ''} ${v.videoId}`.toLowerCase().includes(q),
+      (video) => !q || `${video.title ?? ''} ${video.channel ?? ''} ${video.videoId}`.toLowerCase().includes(q),
     );
 
     return sortVideos(filtered, sort, 'done');

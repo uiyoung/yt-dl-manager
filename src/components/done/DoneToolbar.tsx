@@ -28,17 +28,13 @@ export function DoneToolbar({
   return (
     <div className='flex items-center gap-2'>
       <SelectAll ids={ids} selected={selectedIds.length} />
-      <Button
-        dangerHover
-        disabled={!selectedIds.length}
-        onClick={() => removeDoneVideos(selectedIds)}
-        title='Remove selected videos (choose whether to keep the files)'
-      >
+
+      <Button dangerHover disabled={!selectedIds.length} onClick={() => removeDoneVideos(selectedIds)}>
         <TrashIcon /> Remove{selectedIds.length ? ` (${selectedIds.length})` : ''}
       </Button>
+
       <span className='flex-1' />
       <label className='relative flex items-center'>
-        {/* 입력칸 안쪽 왼쪽에 겹쳐 둔 아이콘 (클릭은 입력칸으로 간다) */}
         <span className='pointer-events-none absolute left-2.5 text-dim'>
           <SearchIcon />
         </span>
@@ -49,6 +45,7 @@ export function DoneToolbar({
           onChange={(e) => onQueryChange(e.target.value)}
         />
       </label>
+
       <SortControl sort={sort} onChange={onSortChange} dateLabel='Date completed' />
     </div>
   );

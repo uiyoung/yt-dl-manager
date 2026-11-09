@@ -13,7 +13,7 @@ import { listClass } from '../../ui';
 export function DoneList({ list, ids }: { list: Video[]; ids: number[] }) {
   const selection = useListSelection(ids);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const virt = useVirtualizer({
+  const virtualizer = useVirtualizer({
     count: list.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => ROW_HEIGHT,
@@ -23,15 +23,15 @@ export function DoneList({ list, ids }: { list: Video[]; ids: number[] }) {
 
   return (
     <div ref={scrollRef} className={listClass}>
-      <ul className='relative' style={{ height: virt.getTotalSize() }}>
-        {virt.getVirtualItems().map((item) => (
+      <ul className='relative' style={{ height: virtualizer.getTotalSize() }}>
+        {virtualizer.getVirtualItems().map((item) => (
           <DoneRow
             key={item.key}
             video={list[item.index]}
             index={item.index}
             top={item.start}
             last={item.index === list.length - 1}
-            measure={virt.measureElement}
+            measure={virtualizer.measureElement}
             selection={selection}
           />
         ))}

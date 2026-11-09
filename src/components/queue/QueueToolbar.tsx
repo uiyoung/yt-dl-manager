@@ -23,10 +23,10 @@ export function QueueToolbar({
   onSortChange: (s: Sort) => void;
 }) {
   const counts = useStore(
-    useShallow((s) => {
+    useShallow((state) => {
       const c = { sel: 0, selStartable: 0, selFailed: 0, selStoppable: 0 };
-      for (const video of Object.values(s.videos)) {
-        if (video.status === 'done' || !s.selected[video.id]) {
+      for (const video of Object.values(state.videos)) {
+        if (video.status === 'done' || !state.selected[video.id]) {
           continue;
         }
 
@@ -72,13 +72,7 @@ export function QueueToolbar({
  * 받을 수 있는 항목이 있으면 Download (모두 실패 항목이면 Retry), 없고 받는 중인 항목만 있으면 Stop.
  * 받을 항목과 받는 중인 항목이 섞여 있으면 Download를 보여주고, 받는 중인 항목은 그대로 둔다.
  */
-function SelectionAction({
-  counts,
-  selectedIds,
-}: {
-  counts: Counts;
-  selectedIds: () => number[];
-}) {
+function SelectionAction({ counts, selectedIds }: { counts: Counts; selectedIds: () => number[] }) {
   const n = (x: number) => (x ? ` (${x})` : '');
   const action = pickAction(counts);
 

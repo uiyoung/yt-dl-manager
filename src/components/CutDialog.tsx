@@ -24,7 +24,7 @@ const closeCut = () => useCut.setState({ target: null });
 /** 앱에 한 번만 두면, openCut()으로 연 창을 띄운다 */
 export function CutDialogHost() {
   const target = useCut((s) => s.target);
-  const video = useStore((s) => (target ? s.videos[target.id] : undefined));
+  const video = useStore((state) => (target ? state.videos[target.id] : undefined));
   if (!target || !video) return null;
   // key: 다른 영상을 열면 입력값을 새로 시작한다
   return <CutDialog key={`${target.mode}-${video.id}`} video={video} mode={target.mode} />;
@@ -56,6 +56,7 @@ function CutDialog({ video, mode }: { video: Video; mode: Mode }) {
   // done: 받은 파일을 미리보기로 연다
   useEffect(() => {
     if (mode !== 'done') return;
+
     api
       .allowPreview(video.id)
       .then((path) => setPreview({ src: convertFileSrc(path), error: null }))
@@ -65,6 +66,7 @@ function CutDialog({ video, mode }: { video: Video; mode: Mode }) {
   // 자르는 중 진행률
   useEffect(() => {
     if (mode !== 'done') return;
+
     const off = listen<{ id: number; percent: number }>('cut-progress', (e) => {
       if (e.payload.id === video.id) setPercent(e.payload.percent);
     });
@@ -108,9 +110,13 @@ function CutDialog({ video, mode }: { video: Video; mode: Mode }) {
   }
 
   async function submit() {
-    if (problem || start == null || end == null) return;
+    if (problem || start == null || end == null) {
+      return;
+    }
+
     setError(null);
     setBusy(true);
+
     try {
       if (mode === 'queue') {
         const clip = await api.addClip(video.id, start, end, precise);
@@ -181,7 +187,8 @@ function CutDialog({ video, mode }: { video: Video; mode: Mode }) {
               onError={() =>
                 setPreview({
                   src: null,
-                  error: "This file can't be previewed here (its format may not be supported). You can still type the times.",
+                  error:
+                    "This file can't be previewed here (its format may not be supported). You can still type the times.",
                 })
               }
             />
@@ -192,16 +199,33 @@ function CutDialog({ video, mode }: { video: Video; mode: Mode }) {
           ))}
 
         <div className='flex flex-wrap items-end gap-3'>
-          <TimeField label='Start' value={startText} onChange={setStartText} disabled={busy} long={long} max={video.duration}>
+          <TimeField
+            label='Start'
+            value={startText}
+            onChange={setStartText}
+            disabled={busy}
+            long={long}
+            max={video.duration}
+          >
             {mode === 'done' && preview.src && (
-              <Button type='button' onClick={() => setFromPlayer('start')} disabled={busy} title='Use the current position'>
+              <Button
+                type='button'
+                onClick={() => setFromPlayer('start')}
+                disabled={busy}
+                title='Use the current position'
+              >
                 Set to current
               </Button>
             )}
           </TimeField>
           <TimeField label='End' value={endText} onChange={setEndText} disabled={busy} long={long} max={video.duration}>
             {mode === 'done' && preview.src && (
-              <Button type='button' onClick={() => setFromPlayer('end')} disabled={busy} title='Use the current position'>
+              <Button
+                type='button'
+                onClick={() => setFromPlayer('end')}
+                disabled={busy}
+                title='Use the current position'
+              >
                 Set to current
               </Button>
             )}

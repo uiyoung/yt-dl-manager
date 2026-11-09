@@ -1,8 +1,8 @@
-import { create } from "zustand";
-import { listen } from "@tauri-apps/api/event";
-import { api } from "./api";
-import type { Progress, Settings, Video } from "./types";
-import { toast } from "./toast";
+import { create } from 'zustand';
+import { listen } from '@tauri-apps/api/event';
+import { api } from './api';
+import type { Progress, Settings, Video } from './types';
+import { toast } from './toast';
 
 interface AppStore {
   videos: Record<number, Video>;
@@ -29,18 +29,20 @@ export const useStore = create<AppStore>((set) => ({
     set((state) => {
       const videos = { ...state.videos };
       let { progress, selected } = state;
+
       for (const video of vs) {
         videos[video.id] = video;
-        if (video.status !== "downloading" && progress[video.id]) {
+        if (video.status !== 'downloading' && progress[video.id]) {
           progress = { ...progress };
           delete progress[video.id];
         }
         // 방금 완료되면 대기열에서 빠지므로 선택도 해제 (done 탭의 선택은 그대로)
-        if (video.status === "done" && state.videos[video.id]?.status !== "done" && selected[video.id]) {
+        if (video.status === 'done' && state.videos[video.id]?.status !== 'done' && selected[video.id]) {
           selected = { ...selected };
           delete selected[video.id];
         }
       }
+
       return { videos, progress, selected };
     }),
   remove: (ids) =>
@@ -53,15 +55,20 @@ export const useStore = create<AppStore>((set) => ({
         delete progress[id];
         delete selected[id];
       }
+
       return { videos, progress, selected };
     }),
   setSelected: (ids, on) =>
     set((state) => {
       const selected = { ...state.selected };
       for (const id of ids) {
-        if (on) selected[id] = true;
-        else delete selected[id];
+        if (on) {
+          selected[id] = true;
+        } else {
+          delete selected[id];
+        }
       }
+
       return { selected };
     }),
   setSettings: (settings) => set({ settings }),
@@ -71,21 +78,29 @@ let initialized = false;
 
 export async function initStore() {
   if (initialized) return;
+
   initialized = true;
-  await listen<Video>("video-updated", (e) => useStore.getState().upsert([e.payload]));
-  await listen<Progress>("download-progress", (e) =>
-    useStore.setState((s) =>
-      s.videos[e.payload.id]?.status === "downloading"
-        ? { progress: { ...s.progress, [e.payload.id]: e.payload } }
-        : s,
+
+  await listen<Video>('video-updated', (e) => useStore.getState().upsert([e.payload]));
+
+  await listen<Progress>('download-progress', (e) =>
+    useStore.setState((state) =>
+      state.videos[e.payload.id]?.status === 'downloading'
+        ? { progress: { ...state.progress, [e.payload.id]: e.payload } }
+        : state,
     ),
   );
-  await listen<{ untilMs: number | null }>("meta-paused", (e) => {
+
+  await listen<{ untilMs: number | null }>('meta-paused', (e) => {
     const until = e.payload.untilMs;
     useStore.setState({ metaPausedUntil: until });
-    if (until) toast("YouTube is limiting requests. Video info lookup is paused for a while.", "error");
+    if (until) {
+      toast('YouTube is limiting requests. Video info lookup is paused for a while.', 'error');
+    }
   });
+
   const [videos, settings] = await Promise.all([api.listVideos(), api.getSettings()]);
+
   useStore.getState().upsert(videos);
   useStore.setState({ settings });
 }

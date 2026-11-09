@@ -65,8 +65,8 @@ function ToolRow({
 }
 
 export function SettingsView() {
-  const saved = useStore((s) => s.settings);
-  const setSettings = useStore((s) => s.setSettings);
+  const saved = useStore((state) => state.settings);
+  const setSettings = useStore((state) => state.setSettings);
   const [draft, setDraft] = useState<Settings | null>(saved);
   const [tools, setTools] = useState<ToolStatus | null>(null);
   const [msg, setMsg] = useState<string | null>(null);

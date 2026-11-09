@@ -18,7 +18,10 @@ export function useListSelection(ids: number[]): ListSelection {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
-      if (t.closest('input:not([type=checkbox]), textarea, select, [contenteditable=true], dialog')) return;
+      if (t.closest('input:not([type=checkbox]), textarea, select, [contenteditable=true], dialog')) {
+        return;
+      }
+
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'a') {
         e.preventDefault();
         setSelected(idsRef.current, true);
