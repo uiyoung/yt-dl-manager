@@ -2,6 +2,7 @@ mod clip;
 mod commands;
 mod db;
 mod meta;
+mod paths;
 mod queue;
 mod tools;
 mod url_parser;
@@ -10,10 +11,16 @@ use std::sync::Arc;
 use tauri::Manager;
 
 /// 로그 파일: macOS ~/Library/Logs/<앱 id>/app.log, Windows %LOCALAPPDATA%\<앱 id>\logs\app.log.
+/// 포터블 모드면 실행 파일 옆 logs\app.log.
 /// 이 앱의 기록만 남기고(라이브러리는 경고 이상), 2MB가 넘으면 새 파일로 넘겨 최근 5개만 둔다.
 fn log_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
-    let mut targets = vec![Target::new(TargetKind::LogDir { file_name: Some("app".into()) })];
+    let file_name = Some("app".to_string());
+    let file = match paths::portable_dir() {
+        Some(dir) => TargetKind::Folder { path: dir.join("logs"), file_name },
+        None => TargetKind::LogDir { file_name },
+    };
+    let mut targets = vec![Target::new(file)];
     if cfg!(debug_assertions) {
         targets.push(Target::new(TargetKind::Stdout));
     }
@@ -35,8 +42,13 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            let data_dir = app.path().app_data_dir()?;
+            let data_dir = paths::data_dir(app)?;
             std::fs::create_dir_all(&data_dir)?;
+            log::info!(
+                "data folder{}: {}",
+                if paths::portable_dir().is_some() { " (portable)" } else { "" },
+                data_dir.display()
+            );
 
             let conn = db::open(&data_dir.join("library.db"))?;
             let state = Arc::new(queue::AppState::new(conn));

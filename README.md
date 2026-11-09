@@ -77,6 +77,24 @@ cd src-tauri && cargo test
 
 ## Where data is stored
 
-- Download list: `library.db` in the app data folder (`~/Library/Application Support/com.ytdlmanager.app/` on macOS)
-- Logs: `app.log`. Open its folder from **Settings → Open log folder**.
-- Videos: the save folder you choose in Settings
+|               | macOS                                               | Windows                                       |
+| ------------- | --------------------------------------------------- | --------------------------------------------- |
+| Download list | `~/Library/Application Support/com.ytdlmanager.app/library.db` | `%APPDATA%\com.ytdlmanager.app\library.db` |
+| Logs          | `~/Library/Logs/com.ytdlmanager.app/app.log`        | `%LOCALAPPDATA%\com.ytdlmanager.app\logs\app.log` |
+
+- Open the log folder from **Settings → Open log folder**.
+- Videos go to the save folder you choose in Settings.
+
+### Portable mode (Windows)
+
+To keep the data next to the app instead, put an empty file named `portable` (or `portable.txt`) in the same folder as the `.exe`:
+
+```
+YT Download Manager\
+├── YT Download Manager.exe
+├── portable          ← empty file
+├── library.db        ← created here
+└── logs\app.log
+```
+
+The folder must be writable, so don't use this inside `C:\Program Files`. Theme and sort choices are still stored by the system web view, not in this folder.

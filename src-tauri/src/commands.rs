@@ -438,9 +438,8 @@ pub fn cancel_cut(st: St, id: i64) {
 /// macOS가 '.app'으로 끝나는 폴더를 앱으로 보고 실행하려다 실패한다.
 #[tauri::command]
 pub fn open_log_folder(app: AppHandle) -> Res<()> {
-    use tauri::Manager;
     use tauri_plugin_opener::OpenerExt;
-    let dir = app.path().app_log_dir().map_err(e)?;
+    let dir = crate::paths::log_dir(&app).map_err(e)?;
     let file = dir.join("app.log");
     let target = if file.is_file() { file } else { dir };
     app.opener().reveal_item_in_dir(&target).map_err(e)
