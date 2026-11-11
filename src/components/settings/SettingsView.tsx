@@ -3,6 +3,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { api } from '../../api';
 import { useStore } from '../../store';
 import { getTheme, saveTheme, type Theme } from '../../theme';
+import { formatZoom, saveZoom, useZoom, ZOOM_LEVELS } from '../../zoom';
 import { Button, cx, lineControl } from '../../ui';
 import { FILENAME_PRESETS, QUALITY_OPTIONS, type Settings, type ToolInfo, type ToolStatus } from '../../types';
 
@@ -71,6 +72,7 @@ export function SettingsView() {
   const [tools, setTools] = useState<ToolStatus | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [theme, setTheme] = useState<Theme>(getTheme);
+  const zoom = useZoom((state) => state.zoom);
 
   useEffect(() => setDraft(saved), [saved]);
 
@@ -219,6 +221,17 @@ export function SettingsView() {
           <small className={hint}>
             Applies right away, no need to save. System follows your macOS or Windows appearance setting.
           </small>
+        </label>
+        <label className={cx(field, narrow)}>
+          <span className={label}>Zoom</span>
+          <select className={lineControl} value={zoom} onChange={(e) => saveZoom(Number(e.target.value))}>
+            {ZOOM_LEVELS.map((level) => (
+              <option key={level} value={level}>
+                {formatZoom(level)}
+              </option>
+            ))}
+          </select>
+          <small className={hint}>Also Ctrl/⌘ + = to zoom in, Ctrl/⌘ + − to zoom out, Ctrl/⌘ + 0 to reset.</small>
         </label>
       </section>
 

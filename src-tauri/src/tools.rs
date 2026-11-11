@@ -7,18 +7,20 @@ use std::process::Stdio;
 use tokio::process::Command;
 
 /// 시스템 PATH에 없을 수 있는 흔한 설치 위치
+#[cfg(not(windows))]
 fn extra_dirs() -> Vec<PathBuf> {
-    let mut v: Vec<PathBuf> = Vec::new();
-    #[cfg(not(windows))]
-    {
-        v.push("/opt/homebrew/bin".into());
-        v.push("/usr/local/bin".into());
-        if let Some(h) = dirs::home_dir() {
-            v.push(h.join(".deno/bin"));
-            v.push(h.join(".local/bin"));
-        }
+    let mut v: Vec<PathBuf> = vec!["/opt/homebrew/bin".into(), "/usr/local/bin".into()];
+    if let Some(h) = dirs::home_dir() {
+        v.push(h.join(".deno/bin"));
+        v.push(h.join(".local/bin"));
     }
     v
+}
+
+/// Windows는 winget 등이 설치하면서 PATH에 넣어 주므로 더 찾지 않는다
+#[cfg(windows)]
+fn extra_dirs() -> Vec<PathBuf> {
+    Vec::new()
 }
 
 /// 찾는 순서: 시스템 PATH → 흔한 설치 위치. 도구는 앱에 넣지 않고 사용자가 직접 설치한다

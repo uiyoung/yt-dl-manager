@@ -41,6 +41,9 @@ pub fn run() {
         .plugin(log_plugin())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        // 창 위치·크기·최대화를 닫을 때 저장하고 다음에 켤 때 되살린다.
+        // 창은 숨긴 채 만들고(tauri.conf.json visible: false), 되살린 뒤 플러그인이 보여 준다
+        .plugin(tauri_plugin_window_state::Builder::new().build())
         .setup(|app| {
             let data_dir = paths::data_dir(app)?;
             std::fs::create_dir_all(&data_dir)?;

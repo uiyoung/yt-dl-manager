@@ -1,6 +1,6 @@
 // 개발용: Tauri 없이 브라우저(npm run dev)에서 화면을 확인할 수 있도록 가짜 백엔드를 붙인다.
 // 실제 앱에서는 불러오지 않는다 (main.tsx 참고).
-import { mockIPC } from "@tauri-apps/api/mocks";
+import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { emit } from "@tauri-apps/api/event";
 import type { Settings, Video } from "./types";
 
@@ -62,6 +62,8 @@ let settings: Settings = {
 };
 
 export function installDevMock() {
+  // getCurrentWebview() 같은 창 API가 동작하도록 main 창이 있는 것처럼 꾸민다
+  mockWindows("main");
   mockIPC(
     async (cmd, args) => {
       const a = (args ?? {}) as Record<string, unknown>;
@@ -190,6 +192,10 @@ export function installDevMock() {
           return;
         case "remove_videos":
           for (const id of a.ids as number[]) videos.splice(videos.findIndex((v) => v.id === id), 1);
+          return;
+        case "plugin:webview|set_webview_zoom":
+          // 브라우저에는 웹뷰 확대가 없으니 CSS zoom으로 흉내 낸다
+          document.documentElement.style.zoom = String(a.value);
           return;
         default:
           return null;
