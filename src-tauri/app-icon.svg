@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="#FCDFCA"/>
+  <!-- 폴더와 재생 모양: scale 값으로 크기를 조절한다 (가운데 기준) -->
+  <g transform="translate(512 511) scale(1.25) translate(-512 -511)">
+    <path d="M349 346 H440 Q452 346 460 355 L490 389 Q496 395 505 395 H674 Q714 395 714 435 V636 Q714 676 674 676 H349 Q309 676 309 636 V386 Q309 346 349 346 Z" fill="#B33A2C"/>
+    <path d="M466 472 L466 600 L578 536 Z" fill="#FCDFCA" stroke="#FCDFCA" stroke-width="22" stroke-linejoin="round"/>
+  </g>
+</svg>
