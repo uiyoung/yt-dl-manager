@@ -166,6 +166,8 @@ function menuItems(video: Video): MenuItem[] {
         }
       },
     },
+    'separator',
+    { label: 'Remove…', danger: true, onClick: () => removeDoneVideos([video.id]) },
   ];
 }
 

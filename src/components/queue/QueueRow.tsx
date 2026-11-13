@@ -187,6 +187,8 @@ function menuItems(video: Video): MenuItem[] {
   const editable = video.status === 'ready' || video.status === 'error';
 
   const items: MenuItem[] = [
+    rowActionItem(video),
+    'separator',
     { label: 'Open on YouTube', onClick: () => openUrl(video.url) },
     { label: 'Copy YouTube link', onClick: () => copyText(video.url, 'Link copied') },
     'separator',
@@ -219,7 +221,22 @@ function menuItems(video: Video): MenuItem[] {
     items.push({ label: 'Copy error message', onClick: () => copyText(video.errorMsg!) });
   }
 
+  items.push('separator', { label: 'Remove…', danger: true, onClick: () => removeVideos([video.id]) });
+
   return items;
+}
+
+/** 메뉴 맨 위 항목: 줄의 주 동작 버튼(RowAction)과 같은 동작 */
+function rowActionItem(video: Video): MenuItem {
+  switch (video.status) {
+    case 'error':
+      return { label: 'Retry', onClick: () => api.download([video.id]) };
+    case 'queued':
+    case 'downloading':
+      return { label: 'Stop', onClick: () => api.stop([video.id]) };
+    default:
+      return { label: 'Download', onClick: () => api.download([video.id]) };
+  }
 }
 
 /** 여러 개를 골라 우클릭했을 때의 메뉴 */
